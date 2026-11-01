@@ -51,8 +51,9 @@ win/
   doc/                            本文档目录
   start-opencode2api.ps1          前台启动
   start-opencode2api.bat          双击启动
+  start-supervised.ps1            前台启动的 Job Object 监督器（关闭窗口即整体回收）
   start-background.ps1            后台启动（写 pid 和日志）
-  stop-opencode2api.ps1           后台停止
+  stop-opencode2api.ps1           停止（两种模式都适用，含边缘代理）
   logs/                           运行日志
 ```
 

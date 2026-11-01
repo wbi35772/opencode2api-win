@@ -16,22 +16,17 @@ echo   API : http://127.0.0.1:28080/v1
 echo   UI  : http://127.0.0.1:28081
 echo.
 echo   Close this window or press Ctrl+C to stop the gateway.
+echo   Closing the window also stops the edge proxy: the gateway,
+echo   the proxy and this console share one job object, so nothing
+echo   is left running and no network listener survives.
 echo   Logs are mirrored to logs\console.log
 echo ============================================================
 echo.
 
-rem The edge proxy pins opencode.ai to Cloudflare edges that answer on
-rem this line; it falls back to the system resolver when they do not.
-if exist "%~dp0tools\edgeproxy.exe" (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "if (-not (Get-NetTCPConnection -LocalPort 29090 -State Listen -ErrorAction SilentlyContinue)) { Start-Process -FilePath '%~dp0tools\edgeproxy.exe' -WindowStyle Hidden }"
-)
-
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Continue'; & '.\opencode2api.exe' -config '.\config.json' 2>&1 | Tee-Object -FilePath '.\logs\console.log'"
-
-if exist "tools\edgeproxy.exe" (
-    taskkill /IM edgeproxy.exe /F >nul 2>&1
-)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start-supervised.ps1"
+set "CODE=%ERRORLEVEL%"
 
 echo.
+if not "%CODE%"=="0" echo Gateway exited with code %CODE%.
 echo Gateway stopped.
 pause

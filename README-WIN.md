@@ -52,22 +52,22 @@ curl.exe --noproxy "*" http://127.0.0.1:28080/healthz
 start-opencode2api.bat
 ```
 
+两个入口都调用 `start-supervised.ps1`。它把网关、`tools\edgeproxy.exe` 和这个控制台放进同一个 Windows Job Object（`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`），所以：
+
+- 点窗口右上角关闭、按 Ctrl+C、或者直接结束这个 PowerShell，网关和边缘代理都会一起退出；
+- 不会留下 `opencode2api.exe`、`edgeproxy.exe` 进程，也不会留下 28080/28081/29090 监听端口；
+- WARP 在进程内用 netstack 完成，不建网卡、不改路由/DNS/防火墙，进程退出后网络参数与启动前一致。
+
 后台运行（日志写到 `logs\`，PID 写到 `logs\pid.txt`）：
 
 ```powershell
 .\start-background.ps1
 ```
 
-停止后台进程：
+停止（两种模式都适用；会按路径清理本目录下的网关和边缘代理）：
 
 ```powershell
 .\stop-opencode2api.ps1
-```
-
-也可以直接结束进程：
-
-```powershell
-Get-Process opencode2api | Stop-Process -Force
 ```
 
 ## 测试 API

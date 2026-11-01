@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
 
 if (-not (Test-Path -LiteralPath .\opencode2api.exe)) {
@@ -8,5 +8,6 @@ if (-not (Test-Path -LiteralPath .\config.json)) {
     throw "config.json not found in $PSScriptRoot"
 }
 
-Write-Host "Starting opencode2api in the foreground. Press Ctrl+C to stop."
-& .\opencode2api.exe -config .\config.json
+# Same supervisor as the .bat entry point: closing the console removes the
+# gateway and the edge proxy together instead of leaving an orphan.
+& (Join-Path $PSScriptRoot 'start-supervised.ps1')

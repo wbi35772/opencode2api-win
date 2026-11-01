@@ -1,18 +1,40 @@
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
 
-$pidFile = Join-Path $PSScriptRoot "logs\pid.txt"
-if (-not (Test-Path -LiteralPath $pidFile)) {
-    Write-Host "No pid file found; nothing to stop."
-    exit 0
+$pidFile = Join-Path $PSScriptRoot 'logs\pid.txt'
+$exe = Join-Path $PSScriptRoot 'opencode2api.exe'
+$edge = Join-Path $PSScriptRoot 'tools\edgeproxy.exe'
+$stopped = @()
+
+if (Test-Path -LiteralPath $pidFile) {
+    $serverPid = 0
+    if ([int]::TryParse((Get-Content -LiteralPath $pidFile -Raw).Trim(), [ref]$serverPid)) {
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$serverPid" -ErrorAction SilentlyContinue
+        if ($proc -and $proc.ExecutablePath -eq $exe) {
+            Stop-Process -Id $serverPid -Force -ErrorAction SilentlyContinue
+            $stopped += $serverPid
+        }
+    }
+    Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
 }
 
-$serverPid = [int](Get-Content -LiteralPath $pidFile)
-$proc = Get-Process -Id $serverPid -ErrorAction SilentlyContinue
-if ($proc) {
-    Stop-Process -Id $serverPid -Force
-    Write-Host "Stopped opencode2api (PID $serverPid)."
-} else {
-    Write-Host "PID $serverPid is not running."
+# The .bat entry point does not write a pid file; it owns the gateway and the
+# edge proxy through a job object. Find both by path so a manual stop from
+# another window still removes everything this checkout started.
+foreach ($path in @($exe, $edge)) {
+    if (-not (Test-Path -LiteralPath $path)) { continue }
+    $name = [IO.Path]::GetFileName($path)
+    Get-CimInstance Win32_Process -Filter "Name='$name'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -eq $path } |
+        ForEach-Object {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            $stopped += $_.ProcessId
+        }
 }
-Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
+
+$stopped = @($stopped | Sort-Object -Unique)
+if ($stopped.Count -gt 0) {
+    Write-Host ("Stopped: {0}" -f ($stopped -join ', '))
+} else {
+    Write-Host "Nothing to stop."
+}
