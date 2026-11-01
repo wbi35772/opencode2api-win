@@ -52,7 +52,12 @@ $ready = $false
 for ($i = 0; $i -lt 15; $i++) {
     Start-Sleep -Seconds 1
     if (-not (Get-Process -Id $p.Id -ErrorAction SilentlyContinue)) { break }
-    $body = & curl.exe -sS --noproxy "*" --max-time 2 "$api/healthz" 2>$null
+    $body = $null
+    try {
+        $body = & curl.exe -sS --noproxy "*" --max-time 2 "$api/healthz" 2>$null
+    } catch {
+        $body = $null
+    }
     if ($body) {
         try {
             $health = $body | ConvertFrom-Json

@@ -9,3 +9,4 @@ usque/
 *.exe
 /tools/
 /config-backups/
+*.exe.bak*
