@@ -21,7 +21,6 @@ func testPool(statePath string, first *exit) *Pool {
 		active:    []*exit{first},
 		reserved:  make(map[string]bool),
 		cooling:   make(map[string]time.Time),
-		strikes:   make(map[string]int),
 		changed:   make(chan struct{}),
 		newExit: func(context.Context) (*exit, error) {
 			return nil, errors.New("registrar unavailable")
@@ -41,11 +40,8 @@ func TestQuotaPenaltyIsNotRestored(t *testing.T) {
 		t.Fatalf("quota-penalized exit was restored: active=%d", len(pool.active))
 	}
 	until, parked := pool.cooling[blocked.egressKey()]
-	if !parked || until.Before(time.Now().Add(25*time.Minute)) {
+	if !parked || until.Before(time.Now().Add(24*time.Hour)) {
 		t.Fatalf("expected at least the base cooldown, got %v (parked=%v)", until, parked)
-	}
-	if got := pool.strikes[blocked.egressKey()]; got != 1 {
-		t.Fatalf("expected one quota strike, got %d", got)
 	}
 }
 
@@ -68,27 +64,15 @@ func TestTransportPenaltyIsRestored(t *testing.T) {
 	}
 }
 
-func TestQuotaCooldownEscalates(t *testing.T) {
-	cases := []struct {
-		strikes int
-		want    time.Duration
-	}{
-		{1, 30 * time.Minute},
-		{2, 2 * time.Hour},
-		{3, 8 * time.Hour},
-		{4, 24 * time.Hour},
-		{8, 24 * time.Hour},
-	}
-	for _, test := range cases {
-		if got := quotaCooldownFor(test.strikes, 0); got != test.want {
-			t.Fatalf("strikes=%d: got %v want %v", test.strikes, got, test.want)
-		}
+func TestQuotaCooldownFixed24h(t *testing.T) {
+	if got := quotaCooldownFor(1, 0); got != 24*time.Hour {
+		t.Fatalf("fixed cooldown = %v want 24h", got)
 	}
 	if got := quotaCooldownFor(1, 3*time.Hour); got != 3*time.Hour {
 		t.Fatalf("Retry-After should win, got %v", got)
 	}
 	if got := quotaCooldownFor(1, 48*time.Hour); got != 24*time.Hour {
-		t.Fatalf("Retry-After should cap at 24h, got %v", got)
+		t.Fatalf("Retry-After capped at 24h, got %v", got)
 	}
 }
 
@@ -128,28 +112,21 @@ func TestPenaltyStateRoundTrip(t *testing.T) {
 	until := time.Now().Add(2 * time.Hour).Round(time.Second)
 	pool.mu.Lock()
 	pool.cooling[key] = until
-	pool.strikes[key] = 3
 	pool.mu.Unlock()
 	pool.saveCooling()
 
-	cooling, strikes := loadPenalties(path)
+	cooling, _ := loadPenalties(path)
 	if got := cooling[key]; !got.Equal(until) {
 		t.Fatalf("cooling round trip = %v want %v", got, until)
 	}
-	if got := strikes[key]; got != 3 {
-		t.Fatalf("strikes round trip = %d want 3", got)
-	}
+	// strikes removed: cooling only persists
 }
 
-func TestSuccessClearsStrikes(t *testing.T) {
+func TestNoteSuccessNoStrikes(t *testing.T) {
 	first := testExit()
 	pool := testPool("", first)
 	key := first.egressKey()
-	pool.strikes[key] = 2
 	pool.noteSuccess(first)
-	if _, exists := pool.strikes[key]; exists {
-		t.Fatal("success did not clear the quota strike")
-	}
 }
 
 func TestPreloadFor(t *testing.T) {

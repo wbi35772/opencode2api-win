@@ -582,8 +582,7 @@ type coolingState struct {
 }
 
 // loadPenalties reads the persisted egress cooldowns (fixed 24h blacklist). Cooling
-// entries whose window has already ended are dropped, but their strike count is
-// kept so the next 429 escalates instead of starting at the base window. A
+// entries whose window has already ended are dropped; the cooldown is a fixed 24h blacklist. A
 // missing or unreadable file yields empty state: the pool must still start when
 // the file is gone or corrupt.
 func loadPenalties(path string) (map[string]time.Time, map[string]int) {
@@ -608,8 +607,7 @@ func loadPenalties(path string) (map[string]time.Time, map[string]int) {
 	return cooling, nil
 }
 
-// saveCooling writes the cooling map and strike counts beside the config so a
-// restart does not register a block the upstream already rejected. Writes are
+// saveCooling writes the fixed 24h blacklist beside the config so a restart does not register a block the upstream already rejected. Writes are
 // serialized and atomic; a failure only costs the restart guarantee, never the
 // pool itself.
 func (p *Pool) saveCooling() {
