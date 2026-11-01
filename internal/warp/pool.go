@@ -1,4 +1,4 @@
-package warp
+﻿package warp
 
 import (
 	"context"
@@ -26,7 +26,7 @@ const maxPreload = 8
 // egressCooldown keeps a public /64 (or IPv4 /32) that the upstream has
 // rejected out of the pool for this long. The free tier scopes its quota to
 // that block, so a new tunnel inside it would only repeat the same answer.
-const egressCooldown = 30 * time.Minute
+const egressCooldown = 24 * time.Hour
 
 // maxEgressCooldown caps an upstream Retry-After. A free-tier window is hours
 // long, and honoring an absurd header (or a clock skew) must not park a block
@@ -48,9 +48,7 @@ const rateLimitCooldown = time.Minute
 // usually a short burst window rather than a daily free-tier quota.
 const maxRateLimitCooldown = 5 * time.Minute
 
-// quotaBackoffFactor escalates a repeatedly rejected /64. The first answer
-// parks it for egressCooldown, then 2h, 8h and 24h; maxEgressCooldown wins.
-const quotaBackoffFactor = 4
+// fixed 24h blacklist for quota 429; retry-after can extend, capped at 24h.
 
 // refillRetryDelay spaces out a failed registration attempt. Successful
 // registrations run back to back in the background.
@@ -141,7 +139,6 @@ type Pool struct {
 	next      int
 	reserved  map[string]bool
 	cooling   map[string]time.Time
-	strikes   map[string]int
 	changed   chan struct{}
 	closed    bool
 	refilling bool
@@ -278,7 +275,7 @@ func newPool(ctx context.Context, log logger, size int, statePath string, create
 	// cancel every later refill and replacement with "context canceled",
 	// leaving the pool stuck on its first egress forever.
 	poolCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	cooling, strikes := loadPenalties(statePath)
+	cooling, _ := loadPenalties(statePath)
 	p := &Pool{
 		ctx:       poolCtx,
 		cancel:    cancel,
@@ -289,14 +286,10 @@ func newPool(ctx context.Context, log logger, size int, statePath string, create
 		newExit:   create,
 		reserved:  make(map[string]bool),
 		cooling:   cooling,
-		strikes:   strikes,
-		changed:   make(chan struct{}),
+			changed:   make(chan struct{}),
 	}
 	if log != nil && len(p.cooling) > 0 {
 		log.Infof("OpenCode WARP inherited %d spent egress block(s) from %s", len(p.cooling), statePath)
-	}
-	if log != nil && len(p.strikes) > 0 {
-		log.Infof("OpenCode WARP inherited %d quota strike record(s) from %s", len(p.strikes), statePath)
 	}
 	// The first registration gates readiness. Cloudflare can answer it with a
 	// rate limit even when this process has just started (the limit follows the
@@ -457,20 +450,10 @@ func classifyPenalty(status int, body []byte) penaltyKind {
 	return penaltyQuota
 }
 
-// quotaCooldownFor escalates a repeatedly rejected egress block. The first
-// answer parks it for egressCooldown, then the window grows fourfold per strike
-// until maxEgressCooldown. Retry-After still wins when it is longer.
-func quotaCooldownFor(strikes int, retryAfter time.Duration) time.Duration {
-	if strikes < 1 {
-		strikes = 1
-	}
+// quotaCooldownFor returns a fixed 24h cooldown for quota 429. Retry-After
+// can extend it, but never past maxEgressCooldown (24h). No escalation.
+func quotaCooldownFor(_ int, retryAfter time.Duration) time.Duration {
 	cooldown := egressCooldown
-	for index := 1; index < strikes && cooldown < maxEgressCooldown; index++ {
-		cooldown *= quotaBackoffFactor
-	}
-	if cooldown > maxEgressCooldown {
-		cooldown = maxEgressCooldown
-	}
 	if retryAfter > cooldown {
 		cooldown = retryAfter
 	}
@@ -496,21 +479,7 @@ func rateLimitCooldownFor(retryAfter time.Duration) time.Duration {
 // noteSuccess clears a block's strike history after a real 2xx. A stale strike
 // must not escalate a later 429 into a 24-hour quarantine.
 func (p *Pool) noteSuccess(e *exit) {
-	key := e.egressKey()
-	if key == "" {
-		return
-	}
-	p.mu.Lock()
-	if e.penaltyKind() != penaltyNone {
-		p.mu.Unlock()
-		return
-	}
-	_, had := p.strikes[key]
-	delete(p.strikes, key)
-	p.mu.Unlock()
-	if had {
-		p.saveCooling()
-	}
+	// Fixed 24h blacklist: no strike escalation to clear.
 }
 
 // Fail drops an exit that cannot carry traffic even though the upstream never
@@ -573,15 +542,7 @@ func (p *Pool) penalize(bad *exit, reason string, retryAfter time.Duration, kind
 	cooldown := transportCooldown
 	switch kind {
 	case penaltyQuota:
-		strikes := 1
-		if key != "" {
-			if p.strikes == nil {
-				p.strikes = make(map[string]int)
-			}
-			p.strikes[key]++
-			strikes = p.strikes[key]
-		}
-		cooldown = quotaCooldownFor(strikes, retryAfter)
+		cooldown = quotaCooldownFor(1, retryAfter)
 	case penaltyRateLimit:
 		cooldown = rateLimitCooldownFor(retryAfter)
 	}
@@ -614,47 +575,37 @@ func (p *Pool) penalize(bad *exit, reason string, retryAfter time.Duration, kind
 }
 
 // coolingState is the on-disk form of the pool's penalty memory. Only rejected
-// public blocks, their expiry, and the number of quota strikes are stored: keys
+// public blocks and their expiry are stored; fixed 24h blacklist, no strikes.
 // and tokens stay out of it.
 type coolingState struct {
 	Cooling map[string]time.Time `json:"cooling"`
-	Strikes map[string]int       `json:"strikes,omitempty"`
 }
 
-// loadPenalties reads the persisted egress cooldowns and strike counts. Cooling
+// loadPenalties reads the persisted egress cooldowns (fixed 24h blacklist). Cooling
 // entries whose window has already ended are dropped, but their strike count is
 // kept so the next 429 escalates instead of starting at the base window. A
 // missing or unreadable file yields empty state: the pool must still start when
 // the file is gone or corrupt.
 func loadPenalties(path string) (map[string]time.Time, map[string]int) {
 	cooling := make(map[string]time.Time)
-	strikes := make(map[string]int)
 	if path == "" {
-		return cooling, strikes
+		return cooling, nil
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return cooling, strikes
+		return cooling, nil
 	}
 	var state coolingState
 	if err := json.Unmarshal(raw, &state); err != nil {
-		return cooling, strikes
+		return cooling, nil
 	}
 	now := time.Now()
 	for key, until := range state.Cooling {
 		if key != "" && until.After(now) {
 			cooling[key] = until
-			if strikes[key] < 1 {
-				strikes[key] = 1
-			}
 		}
 	}
-	for key, count := range state.Strikes {
-		if key != "" && count > 0 {
-			strikes[key] = count
-		}
-	}
-	return cooling, strikes
+	return cooling, nil
 }
 
 // saveCooling writes the cooling map and strike counts beside the config so a
@@ -669,16 +620,10 @@ func (p *Pool) saveCooling() {
 	now := time.Now()
 	state := coolingState{
 		Cooling: make(map[string]time.Time, len(p.cooling)),
-		Strikes: make(map[string]int, len(p.strikes)),
 	}
 	for key, until := range p.cooling {
 		if until.After(now) {
 			state.Cooling[key] = until
-		}
-	}
-	for key, count := range p.strikes {
-		if count > 0 {
-			state.Strikes[key] = count
 		}
 	}
 	p.mu.Unlock()
