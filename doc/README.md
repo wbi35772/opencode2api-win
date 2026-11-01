@@ -11,6 +11,9 @@
 | [03-网络-WARP-与出口.md](03-网络-WARP-与出口.md) | WARP 原理、实测数据、与代理/TUN 的关系、出口 IP 规则 |
 | [04-接入OpenCode.md](04-接入OpenCode.md) | 在 OpenCode 里注册 `win` 模型组、模型清单、与官方组的区别 |
 | [05-故障排查.md](05-故障排查.md) | 症状 → 原因 → 处理，按现象索引 |
+| [06-架构说明.md](06-架构说明.md) | 代码分层、请求路径、WARP 池、进程生命周期、扩展点 |
+| [07-已知问题与限制.md](07-已知问题与限制.md) | 已修/未修问题、环境约束、如何确认问题是否还在 |
+| [08-备份与恢复.md](08-备份与恢复.md) | 仓库拓扑、入库范围、换机恢复、Release 资产、完整性检查 |
 
 ## 一分钟速查
 
@@ -25,18 +28,19 @@
 | 健康检查 | `curl.exe --noproxy "*" http://127.0.0.1:28080/healthz` |
 | 日志 | `logs\stdout.log`、`logs\stderr.log`、`logs\pid.txt` |
 
-## 当前运行状态（2026-10-29 实测）
+## 当前运行状态（2026-11-01 实测）
 
 ```json
 {"status":"ok","ready":true,
- "models":{"status":"ready","total":80,"exposed":8,"stale":false},
- "proxies":{"total":1,"healthy":1},
- "warp":{"status":"ready","stack":"ipv6","size":4,"active":2,"standby":2,"cooling":0}}
+ "models":{"status":"ready","total":78,"exposed":8,"stale":false},
+ "proxies":{"total":2,"healthy":2},
+ "warp":{"status":"ready","stack":"ipv6","size":3,"preload":3,"active":3,"standby":3,"cooling":23}}
 ```
 
-- WARP 已开启，`pool_size=4`，4 个出口全部预热（最多预热 8 个）
+- WARP 已开启，`pool_size=3`，3 个出口全部预热（最多预热 8 个）
 - 连续 5 次免费模型对话全部 200，耗时 2.6–7.9 秒
 - 模型目录在线刷新成功，`degraded` 告警已消失
+- `cooling` 是历史 `/64` 的冷却记录数，不代表当前不可用
 
 ## 目录约定
 

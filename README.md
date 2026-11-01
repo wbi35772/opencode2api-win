@@ -1,5 +1,11 @@
 # opencode2api
 
+> **Windows 二次开发版（本仓库）**
+> 基于上游 `v1.4.6`，额外包含 WARP 物理网卡绑定、出口池惩罚模型、启动降级与后台恢复、进程树 Job Object 约束。
+> 快速上手：[README-WIN.md](README-WIN.md) · 文档索引：[doc/README.md](doc/README.md) · 备份与恢复：[doc/08-备份与恢复.md](doc/08-备份与恢复.md)
+>
+> 以下为上游 README 原文。
+
 [English](README.md) | [简体中文](README.zh-CN.md) | [Tiếng Việt](README.vi.md) | [Italiano](README.it.md)
 
 A Go gateway for **OpenCode Zen and Zen Go**. It exposes Chat Completions, Responses, and Anthropic Messages endpoints, translates between their native protocols, and manages upstream keys and proxies.

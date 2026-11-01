@@ -2,7 +2,7 @@
 
 这个目录是 Windows 二次开发的**独立 Git 仓库**：以主仓库 `2bf547c` 为基线，已于 2026-11-01 合并上游 `v1.4.6`（`58f5667`）。源码、WebUI、文档和 Windows 运行脚本都在这里，修改不会影响上一级目录。
 
-完整文档在 [`doc/README.md`](doc/README.md)，下面只放最常用的部分。
+完整文档在 [`doc/README.md`](doc/README.md)，下面只放最常用的部分。仓库同时备份在 Forgejo `xiaoming/opencode2api-win`，换机恢复和 Release 资产见 [`doc/08-备份与恢复.md`](doc/08-备份与恢复.md)。
 
 - 构建环境：Windows 11 x64，Go 1.24+（实际使用 Go 1.27.3），`CGO_ENABLED=0`
 - 二进制：`opencode2api.exe`（约 20 MB，静态构建，不需要额外 DLL）
@@ -101,12 +101,12 @@ OPENAI_API_KEY=sk-win-local-test
 
 ## 当前状态说明
 
-当前配置是 **WARP 开启、`proxies` 为 `direct`**，实测通过：
+当前配置是 **WARP 开启、`proxies` 为 `http://127.0.0.1:29090` + `direct`**，实测通过：
 
-- WARP 池 18 秒就绪，`pool_size: 4`，4 个出口全部预热（旧版本为 2 active + 2 standby）
+- WARP 池约 18 秒就绪，`pool_size: 3`，3 个出口全部预热（旧版本只预热一半）
 - 连续 8 次免费请求全部 `200`
 - 线上连打 5 次：`200 2.61s / 2.93s / 2.72s / 7.90s / 2.77s`
-- `/healthz` 返回 `status: ok`、`models.stale: false`、`warp.status: ready`
+- `/healthz` 返回 `status: ok`、`models.stale: false`、`warp.status: ready`，`preload` 等于 `size`
 - 带 Key 的 `/v1/models` 返回 8 个免费模型
 
 WARP 在进程内用 netstack 完成，本机不会新增网卡、不会改默认路由，**只有网关进程自己走 WARP**；OpenCode 原生客户端直连 opencode.ai 时用的是你本机的真实 IP，两者额度互不影响。细节见 [`doc/03-网络-WARP-与出口.md`](doc/03-网络-WARP-与出口.md)。
