@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -84,25 +85,54 @@ type registration struct {
 type registrar struct {
 	base   string
 	client *http.Client
+	// direct is a second client that ignores the registry proxy. A proxy that
+	// stops answering must not stop WARP registration: every request falls back
+	// to it before the attempt counts as failed.
+	direct *http.Client
+	log    logger
 
 	mu          sync.Mutex
 	blockedTill time.Time
 }
 
-func newRegistrar() *registrar {
-	return &registrar{
-		base: defaultAPIBase,
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				Proxy:               nil,
-				ForceAttemptHTTP2:   false,
-				MaxIdleConns:        4,
-				IdleConnTimeout:     30 * time.Second,
-				TLSHandshakeTimeout: 10 * time.Second,
-			},
-		},
+func newRegistrar(log logger, proxy *url.URL) *registrar {
+	// Registration is plain HTTPS, so a TUN device that owns the default route
+	// captures it just like it captures the WireGuard UDP. Pinning the dialer
+	// to the physical adapter keeps the whole WARP bootstrap independent of the
+	// host's proxy tunnel; interfaceControl returns nil when no usable adapter
+	// is found, and then the client routes normally.
+	dialer := &net.Dialer{
+		Timeout:   15 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Control:   interfaceControl("tcp4", log),
 	}
+	transport := &http.Transport{
+		Proxy:               nil,
+		DialContext:         dialer.DialContext,
+		ForceAttemptHTTP2:   false,
+		MaxIdleConns:        4,
+		IdleConnTimeout:     30 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
+	r := &registrar{
+		base: defaultAPIBase,
+		log:  log,
+	}
+	if proxy != nil {
+		// The proxy is a local or LAN listener, so the proxied client must not
+		// pin the socket to the physical adapter: IP_UNICAST_IF would make the
+		// proxy address itself unreachable. Only the direct client keeps the
+		// pin, which is exactly what makes it the fallback for a broken proxy.
+		proxied := transport.Clone()
+		proxied.Proxy = http.ProxyURL(proxy)
+		proxied.DialContext = (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+		r.client = &http.Client{Timeout: 30 * time.Second, Transport: proxied}
+		r.direct = &http.Client{Timeout: 30 * time.Second, Transport: transport}
+		log.Infof("WARP registration uses proxy %s; the WireGuard data plane still leaves from this host", proxy.Redacted())
+	} else {
+		r.client = &http.Client{Timeout: 30 * time.Second, Transport: transport}
+	}
+	return r
 }
 
 // blocked reports how much longer Cloudflare's last rate-limit answer keeps
@@ -212,6 +242,10 @@ func (r *registrar) register(ctx context.Context) (registration, error) {
 	if addresses.V4 == "" && addresses.V6 == "" {
 		return registration{}, errors.New("read WARP device: config omitted both IP addresses")
 	}
+	r.log.Debugf("WARP device %s: enabled=%v plus=%v v4=%q v6=%q peers=%d peer=%s endpoints=%d first=%v",
+		created.Result.ID, current.Result.WARPEnabled, current.Result.Account.WarpPlus,
+		addresses.V4, addresses.V6, len(current.Result.Config.Peers), shortKey(peerPublicKey),
+		len(endpoints), endpoints[:min(len(endpoints), 6)])
 	return registration{
 		ID:            created.Result.ID,
 		Token:         created.Result.Token,
@@ -238,6 +272,14 @@ func replaceEndpointPort(endpoint string, port int) string {
 		return net.JoinHostPort(addr.String(), strconv.Itoa(port))
 	}
 	return net.JoinHostPort(endpoint, strconv.Itoa(port))
+}
+
+// shortKey names a WireGuard key in a log line without printing the whole value.
+func shortKey(key string) string {
+	if len(key) <= 12 {
+		return key
+	}
+	return key[:8] + "..."
 }
 
 func uniqueEndpoints(endpoints []string) []string {
@@ -267,24 +309,47 @@ func (r *registrar) doJSON(ctx context.Context, method, path string, body []byte
 			case <-timer.C:
 			}
 		}
-		var reader io.Reader
-		if body != nil {
-			reader = bytes.NewReader(body)
+		build := func() (*http.Request, error) {
+			var reader io.Reader
+			if body != nil {
+				reader = bytes.NewReader(body)
+			}
+			req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(r.base, "/")+path, reader)
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("CF-Client-Version", "a-6.10-2158")
+			req.Header.Set("User-Agent", "okhttp/3.12.1")
+			if token != "" {
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+			return req, nil
 		}
-		req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(r.base, "/")+path, reader)
+		req, err := build()
 		if err != nil {
 			return err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("CF-Client-Version", "a-6.10-2158")
-		req.Header.Set("User-Agent", "okhttp/3.12.1")
-		if token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
 		}
 		resp, err := r.client.Do(req)
 		if err != nil {
 			lastErr = err
-			continue
+			if r.direct == nil || ctx.Err() != nil {
+				continue
+			}
+			// The proxy route failed at the transport layer. Registration only
+			// creates a new device, so retrying the same call over the pinned
+			// direct route is safe and keeps the pool refilling when the proxy
+			// is down.
+			retry, buildErr := build()
+			if buildErr != nil {
+				return buildErr
+			}
+			r.log.Infof("WARP registration through the configured proxy failed (%v); retrying over the direct route", err)
+			resp, err = r.direct.Do(retry)
+			if err != nil {
+				lastErr = err
+				continue
+			}
 		}
 		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		resp.Body.Close()
@@ -355,7 +420,10 @@ type deviceResult struct {
 	ID          string `json:"id"`
 	Token       string `json:"token"`
 	WARPEnabled bool   `json:"warp_enabled"`
-	Config      struct {
+	Account     struct {
+		WarpPlus bool `json:"warp_plus"`
+	} `json:"account"`
+	Config struct {
 		Interface struct {
 			Addresses struct {
 				V4 string `json:"v4"`

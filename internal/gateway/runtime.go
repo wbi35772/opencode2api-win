@@ -2,10 +2,12 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -18,6 +20,14 @@ import (
 	"opencode2api/internal/telemetry"
 	"opencode2api/internal/warp"
 )
+
+// warpEgressError marks a runtime that could not be built because its WARP
+// egress failed to initialize, so startup can tell that apart from a broken
+// configuration and keep serving without WARP.
+type warpEgressError struct{ err error }
+
+func (e warpEgressError) Error() string { return "initialize WARP egress: " + e.err.Error() }
+func (e warpEgressError) Unwrap() error { return e.err }
 
 // gatewayRuntime is one applied configuration: the Gateway built from it, that
 // gateway's HTTP handler, the availability registry it uses, and cancel,
@@ -45,6 +55,17 @@ type ApplyResult struct {
 	RestartFields   []string `json:"restart_fields,omitempty"`
 }
 
+// warpApplyDeadline caps how long a configuration update waits for the first
+// WARP registration. A WebUI save is answered by that same request, so the
+// wait must stay short enough to report a failure instead of looking hung.
+const warpApplyDeadline = 45 * time.Second
+
+// warpStartupDeadline caps the same wait at startup. Registration alone can
+// take over half a minute when Cloudflare rate-limits the client, so this has
+// to stay above that or a healthy WARP never survives startup; a broken egress
+// still cannot hide the listeners past this point.
+const warpStartupDeadline = 90 * time.Second
+
 // RuntimeController owns the running gateway and swaps in a freshly built one
 // whenever a configuration is applied; each request is served by the runtime
 // that was current when it arrived. It also owns the state that outlives a
@@ -68,6 +89,10 @@ type RuntimeController struct {
 	// and stack are unchanged. warpKey is the identity used for that reuse.
 	warpPool *warp.Pool
 	warpKey  string
+	// warpRetryArmed is set while a startup fallback is still trying to bring
+	// WARP up in the background. Any applied configuration disarms it: a
+	// successful apply either supplied a pool or turned WARP off on purpose.
+	warpRetryArmed atomic.Bool
 }
 
 // EffectiveListeners are the listener settings the running process actually
@@ -126,7 +151,30 @@ func RuntimeManager(root context.Context, configPath string, cfg config.Config, 
 		return nil, err
 	}
 	manager.rotation = rotationManager
-	runtime, err := manager.build(cfg)
+	if cfg.Warp.Enabled && manager.logger != nil {
+		// The first WARP registration is synchronous, so the console stays
+		// silent until it finishes; say what the wait is for.
+		manager.logger.Info("starting; the first WARP registration runs now and gives up after "+warpStartupDeadline.String(), "component", "runtime", "event", "runtime_warp_wait", "warp_startup_deadline", warpStartupDeadline.String())
+	}
+	runtime, err := manager.build(cfg, warpStartupDeadline)
+	var warpErr warpEgressError
+	if errors.As(err, &warpErr) {
+		// A WARP egress that cannot be reached must not keep the process from
+		// starting: without listeners the WebUI cannot even turn WARP off, and
+		// every model becomes unreachable. Keep the configured intent on disk,
+		// serve everything else, and keep trying in the background: a proxy
+		// tunnel or a network that swallows the WireGuard handshake for a
+		// minute is temporary, and the operator asked for WARP on disk.
+		if manager.logger != nil {
+			manager.logger.Warn("WARP egress unavailable; starting without it", "component", "runtime", "event", "warp_startup_fallback", "error", err)
+		}
+		fallback := cfg
+		fallback.Warp.Enabled = false
+		runtime, err = manager.build(fallback, 0)
+		if err == nil {
+			manager.retryWARP(cfg.Warp)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -177,8 +225,8 @@ func migrateAvailabilityPath(legacyPath, currentPath string) error {
 // the controller's rotation manager and pricing metadata, and keeps the
 // current runtime's availability registry while the Zen upstream is
 // unchanged; otherwise it uses the registry persisted for the new upstream.
-func (m *RuntimeController) build(cfg config.Config) (*gatewayRuntime, error) {
-	warpPool, warpKey, warpCreated, err := m.selectWARP(cfg)
+func (m *RuntimeController) build(cfg config.Config, warpDeadline time.Duration) (*gatewayRuntime, error) {
+	warpPool, warpKey, warpCreated, err := m.selectWARP(cfg, warpDeadline)
 	if err != nil {
 		return nil, err
 	}
@@ -220,8 +268,10 @@ func (m *RuntimeController) build(cfg config.Config) (*gatewayRuntime, error) {
 // with the same size, stack and outer source prefix is shared across runtimes;
 // creating a new one registers its first exit synchronously, so enabling WARP
 // fails closed when Cloudflare cannot be reached. A disabled configuration
-// returns no pool.
-func (m *RuntimeController) selectWARP(cfg config.Config) (*warp.Pool, string, bool, error) {
+// returns no pool. A non-zero warpDeadline caps the registration wait, which
+// lets an interactive config update fail fast instead of holding its HTTP
+// request for a full Cloudflare registration window.
+func (m *RuntimeController) selectWARP(cfg config.Config, warpDeadline time.Duration) (*warp.Pool, string, bool, error) {
 	if !cfg.Warp.Enabled {
 		return nil, "", false, nil
 	}
@@ -233,7 +283,7 @@ func (m *RuntimeController) selectWARP(cfg config.Config) (*warp.Pool, string, b
 	if cfg.Warp.SourceIPv6 != "" {
 		prefix, err := netip.ParsePrefix(cfg.Warp.SourceIPv6)
 		if err != nil {
-			return nil, "", false, fmt.Errorf("initialize WARP egress: warp.source_ipv6: %w", err)
+			return nil, "", false, warpEgressError{fmt.Errorf("warp.source_ipv6: %w", err)}
 		}
 		source = prefix.Masked()
 	}
@@ -248,13 +298,109 @@ func (m *RuntimeController) selectWARP(cfg config.Config) (*warp.Pool, string, b
 	if timeout < warp.RegistrationWindow+30*time.Second {
 		timeout = warp.RegistrationWindow + 30*time.Second
 	}
+	// A WebUI save waits for this build to finish, so cap it: an unreachable
+	// Cloudflare must surface as a quick error instead of a button that looks
+	// dead for minutes. Startup keeps the full window.
+	if warpDeadline > 0 && warpDeadline < timeout {
+		timeout = warpDeadline
+	}
 	ctx, cancel := context.WithTimeout(m.root, timeout)
 	defer cancel()
-	pool, err := warp.NewWithOptions(ctx, m.logger, warp.Options{Size: cfg.Warp.PoolSize, Stack: warp.Stack(cfg.Warp.Stack), SourceIPv6: source})
+	pool, err := warp.NewWithOptions(ctx, m.logger, warp.Options{Size: cfg.Warp.PoolSize, Stack: warp.Stack(cfg.Warp.Stack), SourceIPv6: source, RegistryProxy: registryProxyURL(cfg), StatePath: warpStatePath(m.configPath)})
 	if err != nil {
-		return nil, "", false, fmt.Errorf("initialize WARP egress: %w", err)
+		return nil, "", false, warpEgressError{err}
 	}
 	return pool, key, true, nil
+}
+
+// warpStatePath names the file that carries rejected WARP egress blocks across
+// restarts, beside the config and its other runtime state files. An empty
+// config path disables persistence.
+func warpStatePath(configPath string) string {
+	if configPath == "" {
+		return ""
+	}
+	return configPath + ".warp-state.json"
+}
+
+// registryProxyURL picks the first configured proxy that is not "direct" for
+// WARP registration. The data plane cannot use it — WireGuard needs UDP, which
+// a CONNECT proxy does not relay — but device creation is plain HTTPS and
+// succeeds through the same exit the rest of the gateway already trusts.
+func registryProxyURL(cfg config.Config) *url.URL {
+	for _, raw := range cfg.RuntimeProxies() {
+		clean, _ := config.ParseProxyEntry(raw)
+		if clean == "" || clean == "direct" {
+			continue
+		}
+		parsed, err := url.Parse(clean)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			continue
+		}
+		return parsed
+	}
+	return nil
+}
+
+// warpRetryDelays spaces out the background retries after startup fell back to
+// serving without WARP. The first one is short because the usual cause is a
+// transient handshake: a proxy tunnel that is still starting, a network that is
+// switching nodes, or Cloudflare briefly refusing the registration.
+var warpRetryDelays = []time.Duration{
+	15 * time.Second,
+	30 * time.Second,
+	time.Minute,
+	2 * time.Minute,
+	5 * time.Minute,
+}
+
+// retryWARP brings a WARP runtime up in the background after startup fell back
+// to serving without it, and swaps it in as soon as one registration succeeds.
+// Without this a single unreachable moment at boot leaves the process on direct
+// egress until someone restarts it by hand, even though the operator asked for
+// WARP. It stops when the controller shuts down, when another runtime already
+// supplies a pool, or when the operator turns WARP off in the meantime.
+func (m *RuntimeController) retryWARP(want config.WarpConfig) {
+	if !want.Enabled {
+		return
+	}
+	m.warpRetryArmed.Store(true)
+	go func() {
+		for attempt := 0; ; attempt++ {
+			delay := warpRetryDelays[len(warpRetryDelays)-1]
+			if attempt < len(warpRetryDelays) {
+				delay = warpRetryDelays[attempt]
+			}
+			timer := time.NewTimer(delay)
+			select {
+			case <-m.root.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			m.updateMu.Lock()
+			current := m.current.Load()
+			// A concurrent save or reload may have brought a pool up, and the
+			// operator may have turned WARP off while this was waiting.
+			if current == nil || current.warpPool != nil || !m.warpRetryArmed.Load() {
+				m.updateMu.Unlock()
+				return
+			}
+			candidate := m.Config()
+			candidate.Warp = want
+			_, err := m.applyLocked(candidate, false)
+			m.updateMu.Unlock()
+			if err == nil {
+				if m.logger != nil {
+					m.logger.Info("WARP egress recovered in the background", "component", "runtime", "event", "warp_retry_succeeded", "attempt", attempt+1)
+				}
+				return
+			}
+			if m.logger != nil {
+				m.logger.Warn("WARP egress still unavailable; will retry", "component", "runtime", "event", "warp_retry_failed", "attempt", attempt+1, "error", err)
+			}
+		}
+	}()
 }
 
 // start launches runtime's proxy health checks and model refresh, and stores
@@ -360,7 +506,7 @@ func (m *RuntimeController) applyLocked(candidate config.Config, persist bool) (
 	if err != nil {
 		return ApplyResult{}, err
 	}
-	next, err := m.build(normalized)
+	next, err := m.build(normalized, warpApplyDeadline)
 	if err != nil {
 		return ApplyResult{}, fmt.Errorf("initialize runtime: %w", err)
 	}
@@ -404,6 +550,9 @@ func (m *RuntimeController) applyLocked(candidate config.Config, persist bool) (
 	m.start(next)
 	previous := m.current.Swap(next)
 	m.warpPool, m.warpKey = next.warpPool, next.warpKey
+	// A successful apply either supplied a WARP pool itself or was asked for a
+	// configuration without WARP, so a pending background retry is moot.
+	m.warpRetryArmed.Store(false)
 	if previous != nil {
 		previous.cancel()
 		if previous.warpPool != nil && previous.warpPool != next.warpPool {

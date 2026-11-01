@@ -343,10 +343,52 @@ func (g *Gateway) maxAnonymousExits() int {
 	return defaultMaxAnonymousExits
 }
 
-// doAnonymousUpstream walks the session's anonymous proxy cursor. Each static
-// proxy is tried at most once, up to performance.max_anonymous_exits proxies;
-// rotating #pool proxies may be drawn again until Retry.MaxAttempts proxies
-// were used. For each proxy it tries the upstreams in anonymousUpstreams
+// doAnonymousUpstream serves the keyless lane. Free-model traffic normally
+// leaves through WARP so every retry can rotate the egress address; when the
+// pool cannot produce an exit, or the last one was spent or blocked, the
+// configured proxies get the request instead of the client getting a 503.
+func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, bodies map[config.Tier][]byte, ids identity.RequestIDs, attemptOffset int) (*http.Response, error, int) {
+	if !g.usesWARP(route.ID, config.TierZen, true) {
+		return g.doAnonymousProxyUpstream(ctx, route, bodies, ids, attemptOffset)
+	}
+	resp, err, attempts := g.doWarpAnonymousUpstream(ctx, route, bodies, ids, attemptOffset)
+	if !g.warpProxyFallbackAllowed(ctx, resp, err) {
+		return resp, err, attempts
+	}
+	// Nothing has been streamed to the client yet: the WARP attempt either
+	// never produced a response or stopped at an error status. One proxy pass
+	// is cheap next to a session that dies on a 429 or a 503.
+	if resp != nil {
+		httpx.DrainAndClose(resp.Body)
+	}
+	g.logger.Warn("WARP free lane has no usable exit; falling back to a configured proxy", "component", "upstream", "event", "warp_proxy_fallback", "request_id", ids.Request, "warp_status", upstreamStatus(resp), "warp_error", err)
+	proxyResp, proxyErr, proxyAttempts := g.doAnonymousProxyUpstream(ctx, route, bodies, ids, attemptOffset+attempts)
+	return proxyResp, proxyErr, attempts + proxyAttempts
+}
+
+// warpProxyFallbackAllowed decides whether the anonymous lane may move from
+// WARP to the proxy list. A deterministic rejection of the request itself is
+// answered the same way by every exit, so it is forwarded instead.
+func (g *Gateway) warpProxyFallbackAllowed(ctx context.Context, resp *http.Response, err error) bool {
+	if ctx.Err() != nil || errors.Is(err, errDeterministicClientRejection) {
+		return false
+	}
+	if g.anonymous.Len() == 0 || g.anonymous.Open() {
+		// No proxy configured, or the lane is paused: switching egress would
+		// only probe a lane the breaker just closed.
+		return false
+	}
+	if err != nil {
+		return true
+	}
+	status := upstreamStatus(resp)
+	return status == http.StatusForbidden || status == http.StatusTooManyRequests || status/100 == 5
+}
+
+// doAnonymousProxyUpstream walks the session's anonymous proxy cursor. Each
+// static proxy is tried at most once, up to performance.max_anonymous_exits
+// proxies; rotating #pool proxies may be drawn again until Retry.MaxAttempts
+// proxies were used. For each proxy it tries the upstreams in anonymousUpstreams
 // order: the configured v2 /inference upstream (Upstream.Anonymous) only, since
 // the v1 lane fallback is retired and commented out there. Any failure,
 // including an HTTP error response, advances to the next upstream or proxy; a
@@ -355,10 +397,7 @@ func (g *Gateway) maxAnonymousExits() int {
 // exhausting the proxy cursor returns control to the preferred authenticated
 // tiers. It returns the last response (body still open), else the last error,
 // plus the number of attempts made.
-func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, bodies map[config.Tier][]byte, ids identity.RequestIDs, attemptOffset int) (*http.Response, error, int) {
-	if g.usesWARP(route.ID, config.TierZen, true) {
-		return g.doWarpAnonymousUpstream(ctx, route, bodies, ids, attemptOffset)
-	}
+func (g *Gateway) doAnonymousProxyUpstream(ctx context.Context, route models.Route, bodies map[config.Tier][]byte, ids identity.RequestIDs, attemptOffset int) (*http.Response, error, int) {
 	// The breaker holds the lane shut for an hour-scale window after repeated
 	// failures: poking a flagged upstream again would only extend the block.
 	if !g.anonymous.AllowAttempt() {

@@ -541,3 +541,15 @@ progress::-moz-progress-bar {
   border-top: 1px solid var(--border-1);
   background: var(--bg);
 }
+
+.sticky-actions .action-status {
+  margin-right: auto;
+  align-self: center;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  text-align: left;
+}
+
+.sticky-actions .action-status[data-tone="error"] {
+  color: var(--bad);
+}

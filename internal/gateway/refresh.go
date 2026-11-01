@@ -331,7 +331,7 @@ func (g *Gateway) refreshAnonymousWARP(ctx context.Context, base string) []strin
 			}
 		}
 		if status > 0 {
-			g.warp.Report(lease, status, nil)
+			g.warp.Report(lease, status, nil, 0)
 		}
 		owned.close()
 		cancel()

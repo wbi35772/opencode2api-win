@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"opencode2api/internal/config"
@@ -123,24 +124,80 @@ func (l *warpLease) close() {
 	})
 }
 
+// warpStreamIdle bounds how long a WARP response may deliver no bytes before
+// the stream is treated as dead. Without it a tunnel that stops forwarding
+// mid-answer leaves the request open until the client gives up, which is the
+// "session dies after half a minute" shape. Two minutes still tolerates a
+// long reasoning pause between events.
+const warpStreamIdle = 2 * time.Minute
+
 // warpBody ties the lease to the response body. Closing the body (or the
-// gateway's drain helpers) releases the exit, and an upstream stream that dies
-// mid-body retires the exit that carried it.
+// gateway's drain helpers) releases the exit, an upstream stream that dies
+// mid-body retires the exit that carried it, and one that goes silent is
+// aborted so the client can retry instead of hanging.
 type warpBody struct {
 	io.ReadCloser
 	lease      *warpLease
 	diagnostic bool
+
+	stop     chan struct{}
+	stopOnce sync.Once
+	lastRead atomic.Int64
+	stalled  atomic.Bool
+}
+
+func (b *warpBody) start() {
+	b.lastRead.Store(time.Now().UnixNano())
+	b.stop = make(chan struct{})
+	go b.watch()
+}
+
+// watch aborts a body that has not produced a byte for warpStreamIdle. Closing
+// the underlying reader unblocks the pending Read; that Read then reports the
+// stall instead of waiting for the request-level deadline.
+func (b *warpBody) watch() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-b.stop:
+			return
+		case now := <-ticker.C:
+			if now.Sub(time.Unix(0, b.lastRead.Load())) < warpStreamIdle {
+				continue
+			}
+			b.stalled.Store(true)
+			if !b.diagnostic {
+				b.lease.pool.Fail(b.lease.lease, "stream idle timeout")
+			}
+			_ = b.ReadCloser.Close()
+			return
+		}
+	}
 }
 
 func (b *warpBody) Read(data []byte) (int, error) {
 	n, err := b.ReadCloser.Read(data)
-	if err != nil && err != io.EOF && !b.diagnostic && !errors.Is(err, context.Canceled) {
-		b.lease.pool.Fail(b.lease.lease, "stream read error")
+	if n > 0 {
+		b.lastRead.Store(time.Now().UnixNano())
+	}
+	if err != nil {
+		if b.stalled.Load() && !errors.Is(err, io.EOF) {
+			return n, fmt.Errorf("WARP stream produced no data for %s: %w", warpStreamIdle, err)
+		}
+		if !errors.Is(err, io.EOF) && !b.diagnostic && !errors.Is(err, context.Canceled) {
+			b.lease.pool.Fail(b.lease.lease, "stream read error")
+		}
 	}
 	return n, err
 }
 
 func (b *warpBody) Close() error {
+	b.stopOnce.Do(func() {
+		if b.stop != nil {
+			close(b.stop)
+		}
+	})
 	err := b.ReadCloser.Close()
 	b.lease.close()
 	return err
@@ -193,9 +250,11 @@ func (g *Gateway) doWARPAttempt(ctx context.Context, req *http.Request, baseURL,
 		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
 			body = peekResponseBody(resp)
 		}
-		g.warp.Report(lease, resp.StatusCode, body)
+		g.warp.Report(lease, resp.StatusCode, body, parseRetryAfter(resp.Header.Get("Retry-After")))
 	}
-	resp.Body = &warpBody{ReadCloser: resp.Body, lease: owned, diagnostic: diagnostic}
+	body := &warpBody{ReadCloser: resp.Body, lease: owned, diagnostic: diagnostic}
+	body.start()
+	resp.Body = body
 	return resp, label, nil
 }
 

@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"strconv"
 	"sync"
+	"syscall"
 
 	"golang.zx2c4.com/wireguard/conn"
 )
@@ -17,6 +18,7 @@ type simpleBind struct {
 	ipv4   *net.UDPConn
 	ipv6   *net.UDPConn
 	source netip.Addr
+	log    logger
 	closed bool
 }
 
@@ -39,7 +41,7 @@ func (b *simpleBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
 		port = uint16(v6.LocalAddr().(*net.UDPAddr).Port)
 		// Keep an IPv4 socket as well: if no IPv6 endpoint answers, the
 		// handshake falls back to IPv4 and the tunnel still comes up.
-		v4, _ := net.ListenUDP("udp4", &net.UDPAddr{Port: int(port)})
+		v4, _ := listenUDP("udp4", &net.UDPAddr{Port: int(port)}, interfaceControl("udp4", b.log))
 		var receives []conn.ReceiveFunc
 		if v4 != nil {
 			receives = append(receives, receiveUDP(v4))
@@ -51,18 +53,18 @@ func (b *simpleBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
 	var v4, v6 *net.UDPConn
 	var err error
 	if port == 0 {
-		v4, err = net.ListenUDP("udp4", &net.UDPAddr{})
+		v4, err = listenUDP("udp4", &net.UDPAddr{}, interfaceControl("udp4", b.log))
 		if err == nil {
 			port = uint16(v4.LocalAddr().(*net.UDPAddr).Port)
 		}
 	} else {
-		v4, err = net.ListenUDP("udp4", &net.UDPAddr{Port: int(port)})
+		v4, err = listenUDP("udp4", &net.UDPAddr{Port: int(port)}, interfaceControl("udp4", b.log))
 	}
 	if err == nil {
-		v6, _ = net.ListenUDP("udp6", &net.UDPAddr{Port: int(port)})
+		v6, _ = listenUDP("udp6", &net.UDPAddr{Port: int(port)}, interfaceControl("udp6", b.log))
 	}
 	if v4 == nil && v6 == nil {
-		v6, err = net.ListenUDP("udp6", &net.UDPAddr{Port: int(port)})
+		v6, err = listenUDP("udp6", &net.UDPAddr{Port: int(port)}, interfaceControl("udp6", b.log))
 		if err != nil {
 			return nil, 0, err
 		}
@@ -91,10 +93,29 @@ func receiveUDP(udp *net.UDPConn) conn.ReceiveFunc {
 	}
 }
 
+// listenUDP opens a UDP socket with control applied before it is bound. The
+// control is what pins the socket to the host's physical adapter, so a TUN
+// device that owns the default route cannot swallow the WireGuard traffic.
+func listenUDP(network string, address *net.UDPAddr, control func(string, string, syscall.RawConn) error) (*net.UDPConn, error) {
+	config := net.ListenConfig{Control: control}
+	packet, err := config.ListenPacket(context.Background(), network, address.String())
+	if err != nil {
+		return nil, err
+	}
+	conn, ok := packet.(*net.UDPConn)
+	if !ok {
+		packet.Close()
+		return nil, fmt.Errorf("listen %s: unexpected connection %T", network, packet)
+	}
+	return conn, nil
+}
+
 // listenIPv6 opens the WireGuard socket bound to the exit's outer source
 // address. Every packet — handshake and data — leaves from that address, so a
 // replacement exit presents Cloudflare with a new source and receives a new
-// public egress.
+// public egress. The configured source already selects the adapter, so this
+// socket deliberately skips interfaceControl: pinning it to a different
+// interface would contradict the address it is bound to.
 func (b *simpleBind) listenIPv6(port uint16) (*net.UDPConn, error) {
 	address := net.JoinHostPort(b.source.String(), strconv.Itoa(int(port)))
 	config := net.ListenConfig{Control: freebindControl}

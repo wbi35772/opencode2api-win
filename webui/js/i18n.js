@@ -304,6 +304,12 @@ const DICTIONARY = {
         "Write outbound request dumps (masked, for tracing retries and conversions only)",
       "config.reload": "Reload from disk",
       "config.save": "Validate, save, and apply",
+      "config.saving": "Validating and applying…",
+      "config.savingHint": "Validating the configuration and rebuilding the runtime…",
+      "config.clearProxies.title": "Clear the proxy list?",
+      "config.clearProxies.message":
+        "The current configuration has {0} proxy entries. Saving now deletes all of them and the gateway will connect directly, which usually cannot reach the upstream without a TUN.",
+      "config.clearProxies.confirm": "Clear anyway",
 
       "logs.level.all": "All levels",
       "logs.component": "Module",
@@ -572,6 +578,8 @@ const DICTIONARY = {
       "toast.config.reloaded": "Configuration reloaded from disk",
       "toast.config.reloadedRestart":
         "Configuration reloaded from disk; listen fields require a restart",
+      "toast.config.warpRejected":
+        "WARP egress validation failed, so nothing was saved: {0}. If you do not need WARP, untick \"WARP egress\" and try again; if you do, make sure this machine can reach api.cloudflareclient.com.",
       "toast.account.updated": "Account updated, please sign in again",
       "toast.play.invalidJson": "The request JSON is invalid: {0}",
       "toast.play.copied": "Raw response copied",

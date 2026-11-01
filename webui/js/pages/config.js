@@ -3,7 +3,7 @@ import { api } from "../api.js";
 import { loadConfig, loadDebugModels } from "../data.js";
 import * as store from "../store.js";
 import { t, onChange } from "../i18n.js";
-import { $, $$, bindTabs, el, openDialog, toast } from "../ui.js";
+import { $, $$, bindTabs, confirmDialog, el, openDialog, toast } from "../ui.js";
 
 function renderChips(name) {
   const host = $(`#${name}-chips`);
@@ -88,6 +88,9 @@ async function save(event) {
   event.preventDefault();
   const current = store.get("config");
   if (!current) return;
+  const button = $("#config-save");
+  const status = $("#config-save-status");
+  const label = button ? button.textContent : "";
   try {
     const update = {
       listen: $("#c-listen").value,
@@ -137,12 +140,43 @@ async function save(event) {
         session_ttl_minutes: numberValue("#c-session"),
       },
     };
+    // A page rendered before the proxy list changed keeps an empty chip list,
+    // and saving that would silently drop the gateway to direct connections:
+    // without a working TUN every upstream request then fails.
+    if (update.proxies.length === 0 && (current.proxies || []).length > 0) {
+      const proceed = await confirmDialog({
+        title: t("清空 Proxy 列表？", "config.clearProxies.title"),
+        message: t(
+          "当前配置里有 {0} 个 Proxy，这次保存会把它们全部删掉，网关将改为直连。不开 TUN 时直连一般连不上上游。",
+          "config.clearProxies.message",
+          (current.proxies || []).length,
+        ),
+        confirmLabel: t("仍然清空", "config.clearProxies.confirm"),
+        danger: true,
+      });
+      if (!proceed) return;
+    }
+    // The server validates a full runtime before answering, and enabling WARP
+    // registers with Cloudflare inside that request. Without a busy state the
+    // button looks dead for as long as that takes.
+    if (button) {
+      button.disabled = true;
+      button.textContent = t("正在验证并应用…", "config.saving");
+    }
+    if (status) {
+      status.dataset.tone = "";
+      status.textContent = t("正在验证配置并重建运行时…", "config.savingHint");
+    }
     const result = await api("/api/config", { method: "PUT", body: JSON.stringify(update) });
     store.set("config", result.config);
     ["server_keys", "zen_keys", "go_keys", "proxies"].forEach(
       (name) => ($(`#${name}-new`).value = ""),
     );
     await loadDebugModels();
+    if (status) {
+      status.dataset.tone = "";
+      status.textContent = "";
+    }
     toast(
       result.result.restart_required
         ? t(
@@ -153,7 +187,25 @@ async function save(event) {
         : t("配置已保存并立即应用", "toast.config.saved"),
     );
   } catch (error) {
-    toast(error.message, true);
+    // A rejected save keeps the previous runtime and the file untouched, so
+    // say what to do instead of only echoing the Go error.
+    const message = /warp/i.test(error.message)
+      ? t(
+          `WARP 出口校验失败，配置未保存：{0}。不需要 WARP 就在上面取消勾选“WARP 出口”后重试；需要 WARP 时确认本机能连上 api.cloudflareclient.com。`,
+          "toast.config.warpRejected",
+          error.message,
+        )
+      : error.message;
+    if (status) {
+      status.dataset.tone = "error";
+      status.textContent = message;
+    }
+    toast(message, true);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = label;
+    }
   }
 }
 

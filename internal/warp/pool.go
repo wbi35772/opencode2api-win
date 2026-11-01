@@ -3,11 +3,14 @@ package warp
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/netip"
+	"net/url"
+	"os"
 	"sync"
 	"time"
 )
@@ -18,6 +21,17 @@ const DefaultPoolSize = 2
 // rejected out of the pool for this long. The free tier scopes its quota to
 // that block, so a new tunnel inside it would only repeat the same answer.
 const egressCooldown = 30 * time.Minute
+
+// maxEgressCooldown caps an upstream Retry-After. A free-tier window is hours
+// long, and honoring an absurd header (or a clock skew) must not park a block
+// forever.
+const maxEgressCooldown = 24 * time.Hour
+
+// transportCooldown parks an exit whose tunnel died for a local reason. The
+// address may well be fine — Cloudflare often reissues the same block — so this
+// only lasts long enough to stop a replacement from colliding with the exit
+// that was just retired.
+const transportCooldown = 90 * time.Second
 
 // refillRetryDelay spaces out a failed registration attempt. Successful
 // registrations run back to back in the background.
@@ -45,6 +59,15 @@ const scaleDownDelay = 60 * time.Second
 // ErrClosed is returned when a pool is used after Close. Callers use it to
 // tell a retiring pool apart from a temporary capacity wait.
 var ErrClosed = errors.New("WARP pool is closed")
+
+// ErrNoExit is returned when the pool has no exit at all and none came up
+// within emptyPoolWait. A caller that keeps waiting only turns a broken WARP
+// into a request that hangs until its own deadline, so it fails fast instead.
+var ErrNoExit = errors.New("WARP pool has no ready egress")
+
+// emptyPoolWait bounds how long Acquire blocks on an empty pool. A registration
+// normally finishes well inside this; anything longer means WARP is down.
+const emptyPoolWait = 25 * time.Second
 
 type logger interface {
 	Debugf(string, ...interface{})
@@ -83,13 +106,14 @@ func (l slogLogger) Errorf(format string, args ...interface{}) {
 }
 
 type Pool struct {
-	ctx     context.Context
-	cancel  context.CancelFunc
-	logger  logger
-	size    int
-	preload int
-	stack   Stack
-	newExit func(context.Context) (*exit, error)
+	ctx       context.Context
+	cancel    context.CancelFunc
+	logger    logger
+	size      int
+	preload   int
+	stack     Stack
+	statePath string
+	newExit   func(context.Context) (*exit, error)
 
 	mu        sync.Mutex
 	active    []*exit
@@ -108,6 +132,7 @@ type Pool struct {
 	refillPaused   time.Time
 	wait           sync.WaitGroup
 	createMu       sync.Mutex
+	stateMu        sync.Mutex
 }
 
 type Lease struct {
@@ -147,6 +172,15 @@ type Options struct {
 	// replacement reaches Cloudflare from a new source and receives a new
 	// public egress — the only way past an egress-scoped free usage limit.
 	SourceIPv6 netip.Prefix
+	// RegistryProxy carries only the HTTPS registration traffic. The WireGuard
+	// data plane still leaves from this host: a proxy that does not relay UDP
+	// cannot carry the tunnel, but it can keep device creation working while
+	// the direct route to api.cloudflareclient.com is flaky.
+	RegistryProxy *url.URL
+	// StatePath persists the egress blocks the upstream has rejected, so a
+	// restart does not register the same spent /64 again. Empty disables
+	// persistence.
+	StatePath string
 }
 
 // NewWithOptions creates a WARP pool whose exits use the selected IP stack and,
@@ -163,8 +197,9 @@ func NewWithOptions(ctx context.Context, log *slog.Logger, opts Options) (*Pool,
 	if size <= 0 {
 		size = DefaultPoolSize
 	}
-	r := newRegistrar()
-	pool, err := newPool(ctx, slogLogger{log: log}, size, func(ctx context.Context) (*exit, error) {
+	formatter := slogLogger{log: log}
+	r := newRegistrar(formatter, opts.RegistryProxy)
+	pool, err := newPool(ctx, formatter, size, opts.StatePath, func(ctx context.Context) (*exit, error) {
 		reg, err := r.register(ctx)
 		if err != nil {
 			return nil, err
@@ -176,7 +211,7 @@ func NewWithOptions(ctx context.Context, log *slog.Logger, opts Options) (*Pool,
 				return nil, err
 			}
 		}
-		return newExitWithStack(ctx, reg, normalized, source)
+		return newExitWithStack(ctx, reg, normalized, source, formatter)
 	})
 	if err != nil {
 		return nil, err
@@ -208,7 +243,7 @@ func randomSource(prefix netip.Prefix) (netip.Addr, error) {
 	return netip.AddrFrom16(address), nil
 }
 
-func newPool(ctx context.Context, log logger, size int, create func(context.Context) (*exit, error)) (*Pool, error) {
+func newPool(ctx context.Context, log logger, size int, statePath string, create func(context.Context) (*exit, error)) (*Pool, error) {
 	if size <= 0 {
 		size = DefaultPoolSize
 	}
@@ -227,15 +262,19 @@ func newPool(ctx context.Context, log logger, size int, create func(context.Cont
 	// leaving the pool stuck on its first egress forever.
 	poolCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	p := &Pool{
-		ctx:      poolCtx,
-		cancel:   cancel,
-		logger:   log,
-		size:     size,
-		preload:  preload,
-		newExit:  create,
-		reserved: make(map[string]bool),
-		cooling:  make(map[string]time.Time),
-		changed:  make(chan struct{}),
+		ctx:       poolCtx,
+		cancel:    cancel,
+		logger:    log,
+		size:      size,
+		preload:   preload,
+		statePath: statePath,
+		newExit:   create,
+		reserved:  make(map[string]bool),
+		cooling:   loadCooling(statePath),
+		changed:   make(chan struct{}),
+	}
+	if log != nil && len(p.cooling) > 0 {
+		log.Infof("OpenCode WARP inherited %d spent egress block(s) from %s", len(p.cooling), statePath)
 	}
 	// The first registration gates readiness. Cloudflare can answer it with a
 	// rate limit even when this process has just started (the limit follows the
@@ -310,11 +349,20 @@ func (p *Pool) Acquire(ctx context.Context) (*Lease, error) {
 		}
 		p.waiting++
 		changed := p.changed
+		empty := len(p.active) == 0
 		needRefill := len(p.active) < p.desiredLocked()
 		p.mu.Unlock()
 		if needRefill {
 			// Queued demand is demand too: start growing before we block.
 			p.startRefill()
+		}
+		var deadline <-chan time.Time
+		if empty {
+			// Nothing to wait for but a registration: fail before the caller's
+			// own attempt budget turns into a minute-long hang.
+			timer := time.NewTimer(emptyPoolWait)
+			defer timer.Stop()
+			deadline = timer.C
 		}
 		var err error
 		select {
@@ -323,6 +371,8 @@ func (p *Pool) Acquire(ctx context.Context) (*Lease, error) {
 		case <-p.ctx.Done():
 			err = ErrClosed
 		case <-changed:
+		case <-deadline:
+			err = ErrNoExit
 		}
 		p.mu.Lock()
 		p.waiting--
@@ -333,7 +383,11 @@ func (p *Pool) Acquire(ctx context.Context) (*Lease, error) {
 	}
 }
 
-func (p *Pool) Report(lease *Lease, status int, body []byte) {
+// Report feeds one upstream response back into the pool. retryAfter, when the
+// upstream sent one, lengthens the egress cooldown: the free-tier window is
+// scoped to the public block and lasts hours, so parking the block for the
+// header's duration keeps the pool from rotating back into a spent /64.
+func (p *Pool) Report(lease *Lease, status int, body []byte, retryAfter time.Duration) {
 	if lease == nil || lease.exit == nil {
 		return
 	}
@@ -341,7 +395,22 @@ func (p *Pool) Report(lease *Lease, status int, body []byte) {
 	if !rotate {
 		return
 	}
-	p.penalize(lease.exit, reason)
+	// The upstream said the egress itself is spent, so the whole /64 is out of
+	// quota and must stay out for the full cooldown.
+	p.penalize(lease.exit, reason, egressCooldownFor(retryAfter))
+}
+
+// egressCooldownFor turns an upstream Retry-After into an egress cooldown: the
+// base window at minimum, the header when it is longer, and maxEgressCooldown
+// as the ceiling.
+func egressCooldownFor(retryAfter time.Duration) time.Duration {
+	if retryAfter <= egressCooldown {
+		return egressCooldown
+	}
+	if retryAfter > maxEgressCooldown {
+		return maxEgressCooldown
+	}
+	return retryAfter
 }
 
 // Fail drops an exit that cannot carry traffic even though the upstream never
@@ -351,7 +420,10 @@ func (p *Pool) Fail(lease *Lease, reason string) {
 	if lease == nil || lease.exit == nil || reason == "" {
 		return
 	}
-	p.penalize(lease.exit, reason)
+	// A dead tunnel says nothing about the egress address: Cloudflare usually
+	// hands the same /64 to the replacement, so parking it for the full
+	// cooldown would lock the pool's only usable subnet out of rotation.
+	p.penalize(lease.exit, reason, transportCooldown)
 }
 
 func (p *Pool) Size() int { return p.size }
@@ -361,7 +433,15 @@ func (p *Pool) Size() int { return p.size }
 func (p *Pool) Snapshot() Snapshot {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	snapshot := Snapshot{Stack: string(p.stack), Size: p.size, Preload: p.preload, Active: len(p.active), Cooling: len(p.cooling)}
+	snapshot := Snapshot{Stack: string(p.stack), Size: p.size, Preload: p.preload, Active: len(p.active)}
+	// Cooled subnets are swept lazily; counting the stored map would keep
+	// reporting blocks whose cooldown has already run out.
+	now := time.Now()
+	for _, until := range p.cooling {
+		if until.After(now) {
+			snapshot.Cooling++
+		}
+	}
 	for _, active := range p.active {
 		if active.idle() {
 			snapshot.Standby++
@@ -373,7 +453,7 @@ func (p *Pool) Snapshot() Snapshot {
 	return snapshot
 }
 
-func (p *Pool) penalize(bad *exit, reason string) {
+func (p *Pool) penalize(bad *exit, reason string, cooldown time.Duration) {
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
@@ -389,7 +469,10 @@ func (p *Pool) penalize(bad *exit, reason string) {
 		return
 	}
 	if key := bad.egressKey(); key != "" {
-		p.cooling[key] = time.Now().Add(egressCooldown)
+		// Never shorten a block the upstream asked for.
+		if until, parked := p.cooling[key]; !parked || until.Before(time.Now().Add(cooldown)) {
+			p.cooling[key] = time.Now().Add(cooldown)
+		}
 		delete(p.reserved, key)
 	}
 	p.active = append(p.active[:index], p.active[index+1:]...)
@@ -399,6 +482,7 @@ func (p *Pool) penalize(bad *exit, reason string) {
 	p.notifyLocked()
 	p.wait.Add(1)
 	p.mu.Unlock()
+	p.saveCooling()
 
 	if p.logger != nil {
 		p.logger.Warnf("Rotating OpenCode WARP egress %s (%s)", bad.id, reason)
@@ -409,6 +493,66 @@ func (p *Pool) penalize(bad *exit, reason string) {
 		defer p.wait.Done()
 		p.replace(bad, reason)
 	}()
+}
+
+// coolingState is the on-disk form of the pool's penalty memory. Only rejected
+// public blocks and their expiry are stored: keys and tokens stay out of it.
+type coolingState struct {
+	Cooling map[string]time.Time `json:"cooling"`
+}
+
+// loadCooling reads the persisted egress cooldowns, dropping entries whose
+// window has already ended. A missing or unreadable file yields an empty state:
+// the pool must still start when the file is gone or corrupt.
+func loadCooling(path string) map[string]time.Time {
+	cooling := make(map[string]time.Time)
+	if path == "" {
+		return cooling
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return cooling
+	}
+	var state coolingState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return cooling
+	}
+	now := time.Now()
+	for key, until := range state.Cooling {
+		if key != "" && until.After(now) {
+			cooling[key] = until
+		}
+	}
+	return cooling
+}
+
+// saveCooling writes the cooling map beside the config so a restart does not
+// register a block the upstream already rejected. Writes are serialized and
+// atomic; a failure only costs the restart guarantee, never the pool itself.
+func (p *Pool) saveCooling() {
+	if p.statePath == "" {
+		return
+	}
+	p.mu.Lock()
+	now := time.Now()
+	state := coolingState{Cooling: make(map[string]time.Time, len(p.cooling))}
+	for key, until := range p.cooling {
+		if until.After(now) {
+			state.Cooling[key] = until
+		}
+	}
+	p.mu.Unlock()
+	raw, err := json.Marshal(state)
+	if err != nil {
+		return
+	}
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	temp := p.statePath + ".tmp"
+	if err := os.WriteFile(temp, raw, 0o600); err != nil {
+		return
+	}
+	_ = os.Rename(temp, p.statePath)
 }
 
 func (p *Pool) replace(old *exit, reason string) {
@@ -435,6 +579,7 @@ func (p *Pool) replace(old *exit, reason string) {
 			p.notifyLocked()
 		}
 		p.mu.Unlock()
+		p.saveCooling()
 		if !restored {
 			old.retire()
 		}

@@ -1,22 +1,11 @@
-.key
-config.json
-config.json.bak
-.config-*.tmp
-*.models.dev.json
-opencode/
-/opencode2api
 /opencode2api.exe
+/config.json
+/config.json.*
+/logs/
 *.log
-.tmp/
-.gocache/
-*.models.catalog.json
-coverage.out
-*.test
-*.test.exe
 
-*.rotation.json
-.rotation-*.tmp
-
-# Local credentials, deployment backups, and verification artifacts
-.local/
-*.availability.json
+# Local MASQUE/WARP instances (contain private keys)
+usque/
+*.exe
+/tools/
+/config-backups/
