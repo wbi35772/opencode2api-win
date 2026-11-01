@@ -103,7 +103,7 @@ OPENAI_API_KEY=sk-win-local-test
 
 当前配置是 **WARP 开启、`proxies` 为 `direct`**，实测通过：
 
-- WARP 池 18 秒就绪，`pool_size: 4`，2 个 active + 2 个 standby
+- WARP 池 18 秒就绪，`pool_size: 4`，4 个出口全部预热（旧版本为 2 active + 2 standby）
 - 连续 8 次免费请求全部 `200`
 - 线上连打 5 次：`200 2.61s / 2.93s / 2.72s / 7.90s / 2.77s`
 - `/healthz` 返回 `status: ok`、`models.stale: false`、`warp.status: ready`

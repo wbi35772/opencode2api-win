@@ -34,7 +34,7 @@
  "warp":{"status":"ready","stack":"ipv6","size":4,"active":2,"standby":2,"cooling":0}}
 ```
 
-- WARP 已开启，`pool_size=4`，2 个出口在线 + 2 个热备
+- WARP 已开启，`pool_size=4`，4 个出口全部预热（最多预热 8 个）
 - 连续 5 次免费模型对话全部 200，耗时 2.6–7.9 秒
 - 模型目录在线刷新成功，`degraded` 告警已消失
 

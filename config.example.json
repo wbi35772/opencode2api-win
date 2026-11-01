@@ -6,7 +6,7 @@
   "anonymous": true,
   "warp": {
     "enabled": false,
-    "pool_size": 2,
+    "pool_size": 4,
     "stack": "ipv6",
     "source_ipv6": ""
   },

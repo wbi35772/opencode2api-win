@@ -70,6 +70,19 @@ func ParseStack(value string) (Stack, error) {
 	}
 }
 
+// penaltyKind records why an exit left the ring. Only transport failures may be
+// restored when a replacement cannot be registered: a quota or rate-limit
+// answer belongs to the public egress, and putting that same /64 back would
+// immediately reproduce the same answer.
+type penaltyKind uint8
+
+const (
+	penaltyNone penaltyKind = iota
+	penaltyTransport
+	penaltyQuota
+	penaltyRateLimit
+)
+
 type exit struct {
 	id        string
 	egress    netip.Addr
@@ -81,7 +94,7 @@ type exit struct {
 	refs      int
 	retired   bool
 	closed    bool
-	penalized bool
+	penalty   penaltyKind
 	closeOnce sync.Once
 }
 
@@ -632,7 +645,7 @@ func (e *exit) close() {
 func (e *exit) observe(status int, body []byte) (bool, string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.penalized {
+	if e.penalty != penaltyNone {
 		return false, ""
 	}
 	if status == http.StatusForbidden {
@@ -652,20 +665,26 @@ func (e *exit) observe(status int, body []byte) (bool, string) {
 	return false, ""
 }
 
-func (e *exit) markPenalized() bool {
+func (e *exit) markPenalized(kind penaltyKind) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.penalized {
+	if e.penalty != penaltyNone {
 		return false
 	}
-	e.penalized = true
+	e.penalty = kind
 	return true
 }
 
 func (e *exit) clearPenalty() {
 	e.mu.Lock()
-	e.penalized = false
+	e.penalty = penaltyNone
 	e.mu.Unlock()
+}
+
+func (e *exit) penaltyKind() penaltyKind {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.penalty
 }
 
 func networkAnomaly(body []byte) bool {
