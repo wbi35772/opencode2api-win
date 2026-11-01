@@ -1,6 +1,6 @@
 # opencode2api Windows 独立测试版
 
-这个目录是主仓库的独立副本，源码、WebUI 资源和 Windows 二进制都在这里，修改不会影响上一级目录。
+这个目录是 Windows 二次开发的**独立 Git 仓库**：以主仓库 `2bf547c` 为基线，已于 2026-11-01 合并上游 `v1.4.6`（`58f5667`）。源码、WebUI、文档和 Windows 运行脚本都在这里，修改不会影响上一级目录。
 
 完整文档在 [`doc/README.md`](doc/README.md)，下面只放最常用的部分。
 
@@ -30,6 +30,13 @@ curl.exe --noproxy "*" http://127.0.0.1:28080/healthz
 `ready: true` 表示 API 已经可以接请求；如果 `status` 是 `degraded`，通常只是模型目录还在刷新，等几秒会变成 `ok`。
 
 如果免费额度耗尽（当前直连就是这种情况），健康检查可能显示 `ready: false`、`no_healthy_proxies`。这表示免费通道不可用，不代表进程没启动；WebUI 和带 Key 的 API 仍然可以访问。启动脚本不会因为 `ready: false` 而判定启动失败。
+
+## 上游同步
+
+- 本目录是独立仓库，`upstream` 指向主仓库。基线提交 `cac66ef`（上游 `2bf547c`）保存了 Windows 二次开发的全部改动。
+- 2026-11-01 合并上游 `v1.4.6`（`58f5667`，合并提交 `a93d805`），自动合并无冲突：暗色主题切换、请求/上游尝试表格分页、`POST /api/models/probe` 立即重探、配置页代理 chip 折叠。
+- Windows 侧 WARP 改动（物理网卡绑定、启动失败后台重试、池/注册器加固）全部保留。
+- 以后同步：`git fetch upstream main && git merge upstream/main`，合并前确认 `git status` 干净。
 
 ## 启动和停止
 
@@ -189,6 +196,6 @@ win/
 
 ## 注意
 
-- 这是独立副本，不是 Git 工作树；不要在主仓库根目录和 `win/` 里同时修改同一份源码。
+- 这是独立的 Git 仓库，不是主仓库的工作树；不要在主仓库根目录和 `win/` 里同时修改同一份源码，上游同步统一走 `git fetch upstream main && git merge upstream/main`。
 - 同一份 `config.json` 不要同时启动两个进程，缓存、轮换状态和端口会冲突。
 - 免费模型额度按出口 IP/网段计算，429 不一定是配置错误；换出口或换代理后再判断。
