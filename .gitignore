@@ -1,0 +1,12 @@
+/opencode2api.exe
+/config.json
+/config.json.*
+/logs/
+*.log
+
+# Local MASQUE/WARP instances (contain private keys)
+usque/
+*.exe
+/tools/
+/config-backups/
+*.exe.bak*
