@@ -1,4 +1,4 @@
-﻿package warp
+package warp
 
 import (
 	"context"
@@ -86,6 +86,12 @@ var ErrNoExit = errors.New("WARP pool has no ready egress")
 // normally finishes well inside this; anything longer means WARP is down.
 const emptyPoolWait = 25 * time.Second
 
+// maxAffinity bounds the conversation→exit map. A gateway that runs for weeks
+// sees far more conversations than exits, so the map is capped and one entry is
+// dropped at random when it fills; an evicted conversation simply lands on the
+// ring again.
+const maxAffinity = 4096
+
 type logger interface {
 	Debugf(string, ...interface{})
 	Infof(string, ...interface{})
@@ -131,18 +137,23 @@ type Pool struct {
 	stack     Stack
 	statePath string
 	newExit   func(context.Context) (*exit, error)
+	// relay is the shared SOCKS5 UDP circuit breaker; nil when the outer UDP
+	// goes direct.
+	relay *relayGuard
 
-	mu        sync.Mutex
-	active    []*exit
-	inflight  int
-	waiting   int
-	next      int
-	reserved  map[string]bool
-	cooling   map[string]time.Time
-	changed   chan struct{}
-	closed    bool
-	refilling bool
-	scaling   bool
+	mu            sync.Mutex
+	active        []*exit
+	affinity      map[string]*exit
+	inflight      int
+	waiting       int
+	next          int
+	reserved      map[string]bool
+	cooling       map[string]time.Time
+	falsePositive map[string]bool
+	changed       chan struct{}
+	closed        bool
+	refilling     bool
+	scaling       bool
 	// refillFailures counts consecutive failed preload registrations;
 	// refillPaused keeps every refill trigger quiet until it expires.
 	refillFailures int
@@ -189,11 +200,22 @@ type Options struct {
 	// replacement reaches Cloudflare from a new source and receives a new
 	// public egress — the only way past an egress-scoped free usage limit.
 	SourceIPv6 netip.Prefix
+	// TUN makes every WARP socket follow the host's system route instead of
+	// pinning it to the physical adapter and binding an outer source. Use it
+	// when the WireGuard handshake must travel through a local TUN device.
+	TUN bool
 	// RegistryProxy carries only the HTTPS registration traffic. The WireGuard
 	// data plane still leaves from this host: a proxy that does not relay UDP
 	// cannot carry the tunnel, but it can keep device creation working while
 	// the direct route to api.cloudflareclient.com is flaky.
 	RegistryProxy *url.URL
+	// SocksUDP routes the WireGuard outer UDP through a SOCKS5 proxy's UDP
+	// ASSOCIATE relay (socks5://[user:pass@]host:port). Use it when this host
+	// cannot send UDP directly but the proxy client can forward it. Empty keeps
+	// the direct socket. When set, the relay owns the outer source, so
+	// SourceIPv6 and TUN no longer apply to the data plane; TUN still selects
+	// the registration route.
+	SocksUDP string
 	// StatePath persists the egress blocks the upstream has rejected, so a
 	// restart does not register the same spent /64 again. Empty disables
 	// persistence.
@@ -215,25 +237,61 @@ func NewWithOptions(ctx context.Context, log *slog.Logger, opts Options) (*Pool,
 		size = DefaultPoolSize
 	}
 	formatter := slogLogger{log: log}
-	r := newRegistrar(formatter, opts.RegistryProxy)
+	r := newRegistrar(formatter, opts.RegistryProxy, opts.TUN)
+	var relay *socks5Proxy
+	var guard *relayGuard
+	if opts.SocksUDP != "" {
+		parsed, err := parseSocks5Proxy(opts.SocksUDP)
+		if err != nil {
+			return nil, fmt.Errorf("WARP socks_udp: %w", err)
+		}
+		relay = &parsed
+		guard = newRelayGuard(formatter)
+	}
 	pool, err := newPool(ctx, formatter, size, opts.StatePath, func(ctx context.Context) (*exit, error) {
+		if guard != nil {
+			if err := guard.acquire(); err != nil {
+				return nil, err
+			}
+			// Validate the relay before spending a device registration: a dead
+			// proxy then costs one failed handshake, not a new WARP device on
+			// every refill attempt.
+			if err := relay.preflight(ctx, opts.TUN, formatter); err != nil {
+				guard.failure(err)
+				return nil, fmt.Errorf("WARP socks_udp: %w", err)
+			}
+		}
 		reg, err := r.register(ctx)
 		if err != nil {
+			if guard != nil {
+				guard.abandon()
+			}
 			return nil, err
 		}
 		var source netip.Addr
-		if opts.SourceIPv6.IsValid() {
+		if relay == nil && opts.SourceIPv6.IsValid() && !opts.TUN {
 			source, err = randomSource(opts.SourceIPv6)
 			if err != nil {
 				return nil, err
 			}
 		}
-		return newExitWithStack(ctx, reg, normalized, source, formatter)
+		candidate, err := newExitWithRelay(ctx, reg, normalized, source, formatter, opts.TUN, relay, guard)
+		if err != nil {
+			if guard != nil {
+				guard.failure(err)
+			}
+			return nil, err
+		}
+		if guard != nil {
+			guard.success()
+		}
+		return candidate, nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	pool.stack = normalized
+	pool.relay = guard
 	return pool, nil
 }
 
@@ -285,8 +343,9 @@ func newPool(ctx context.Context, log logger, size int, statePath string, create
 		statePath: statePath,
 		newExit:   create,
 		reserved:  make(map[string]bool),
+		affinity:  make(map[string]*exit),
 		cooling:   cooling,
-			changed:   make(chan struct{}),
+		changed:   make(chan struct{}),
 	}
 	if log != nil && len(p.cooling) > 0 {
 		log.Infof("OpenCode WARP inherited %d spent egress block(s) from %s", len(p.cooling), statePath)
@@ -356,11 +415,34 @@ func (p *Pool) desiredLocked() int {
 }
 
 func (p *Pool) Acquire(ctx context.Context) (*Lease, error) {
+	return p.AcquireFor(ctx, "")
+}
+
+// AcquireFor leases an exit, preferring the one already serving affinity (the
+// conversation key). The free tier ledgers its quota against the pair (session,
+// egress), so a conversation that hops exits looks spent to every fresh one and
+// answers 429 on the first attempt of every turn. Pinning the conversation to a
+// single exit removes that pattern; an empty affinity keeps the old
+// round-robin behavior for keyed and probe traffic.
+func (p *Pool) AcquireFor(ctx context.Context, affinity string) (*Lease, error) {
 	for {
 		p.mu.Lock()
 		if p.closed {
 			p.mu.Unlock()
 			return nil, ErrClosed
+		}
+		if affinity != "" {
+			if bound := p.affinity[affinity]; bound != nil {
+				if p.activeIndexLocked(bound) >= 0 && bound.addRef() {
+					p.inflight++
+					p.mu.Unlock()
+					// Demand just rose: grow the ring toward it in the background.
+					p.startRefill()
+					return &Lease{pool: p, exit: bound}, nil
+				}
+				// The exit was retired while this conversation was idle.
+				delete(p.affinity, affinity)
+			}
 		}
 		for attempts := 0; attempts < len(p.active); attempts++ {
 			index := p.next % len(p.active)
@@ -368,6 +450,9 @@ func (p *Pool) Acquire(ctx context.Context) (*Lease, error) {
 			active := p.active[index]
 			if active.addRef() {
 				p.inflight++
+				if affinity != "" {
+					p.bindAffinityLocked(affinity, active)
+				}
 				p.mu.Unlock()
 				// Demand just rose: grow the ring toward it in the background.
 				p.startRefill()
@@ -426,6 +511,30 @@ func (p *Pool) Report(lease *Lease, status int, body []byte, retryAfter time.Dur
 		return
 	}
 	p.penalize(lease.exit, reason, retryAfter, classifyPenalty(status, body))
+}
+
+// PenalizeEgress parks the active exit whose public egress key is key. A 429
+// can be held back while the caller validates whether it follows the session
+// or the exit; when the rotated session is rejected too, this retires the held
+// exit that was never reported. It reports whether an active exit matched.
+func (p *Pool) PenalizeEgress(key string, status int, body []byte, retryAfter time.Duration) bool {
+	if key == "" {
+		return false
+	}
+	p.mu.Lock()
+	var bad *exit
+	for _, candidate := range p.active {
+		if candidate.egressKey() == key {
+			bad = candidate
+			break
+		}
+	}
+	p.mu.Unlock()
+	if bad == nil {
+		return false
+	}
+	p.penalize(bad, "429 survived session rotation", retryAfter, classifyPenalty(status, body))
+	return true
 }
 
 // classifyPenalty separates a spent free-tier quota from an ordinary burst rate
@@ -523,6 +632,19 @@ func (p *Pool) Snapshot() Snapshot {
 }
 
 func (p *Pool) penalize(bad *exit, reason string, retryAfter time.Duration, kind penaltyKind) {
+	if p.relay != nil && kind == penaltyTransport {
+		// A stalled request is not proof that this exit is bad: the shared
+		// relay may be the failing hop. Feed the circuit breaker and, while it
+		// is open, keep the exit rather than retiring it and asking the pool to
+		// register a replacement through the same dead relay.
+		p.relay.failure(errors.New(reason))
+		if p.relay.open() {
+			if p.logger != nil {
+				p.logger.Warnf("OpenCode WARP relay circuit is open; keeping the egress active (%s)", reason)
+			}
+			return
+		}
+	}
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
@@ -578,7 +700,8 @@ func (p *Pool) penalize(bad *exit, reason string, retryAfter time.Duration, kind
 // public blocks and their expiry are stored; fixed 24h blacklist, no strikes.
 // and tokens stay out of it.
 type coolingState struct {
-	Cooling map[string]time.Time `json:"cooling"`
+	Cooling       map[string]time.Time `json:"cooling"`
+	FalsePositive map[string]bool      `json:"false_positive"`
 }
 
 // loadPenalties reads the persisted egress cooldowns (fixed 24h blacklist). Cooling
@@ -617,11 +740,13 @@ func (p *Pool) saveCooling() {
 	p.mu.Lock()
 	now := time.Now()
 	state := coolingState{
-		Cooling: make(map[string]time.Time, len(p.cooling)),
+		Cooling:       make(map[string]time.Time, len(p.cooling)),
+		FalsePositive: make(map[string]bool),
 	}
 	for key, until := range p.cooling {
 		if until.After(now) {
 			state.Cooling[key] = until
+			state.FalsePositive[key] = p.falsePositive[key]
 		}
 	}
 	p.mu.Unlock()
@@ -782,6 +907,19 @@ func (p *Pool) refill() {
 				if p.logger != nil {
 					p.logger.Infof("OpenCode WARP preload paused for %s after %d duplicate egresses", delay.Round(time.Second), failures)
 				}
+			}
+		} else if pause := relayUnavailablePause(err); pause > 0 {
+			// The shared relay circuit is open: do not register through it.
+			// Pace the next attempt to the cooldown so refill stays quiet.
+			delay = pause
+			if delay < refillRetryDelay {
+				delay = refillRetryDelay
+			}
+			if delay > maxRateLimitPause {
+				delay = maxRateLimitPause
+			}
+			if p.logger != nil {
+				p.logger.Infof("OpenCode WARP relay unavailable; next registration in %s", delay.Round(time.Second))
 			}
 		} else if p.logger != nil {
 			p.logger.Warnf("Cannot pre-register OpenCode WARP egress: %v", err)
@@ -978,6 +1116,19 @@ func (p *Pool) activeIndexLocked(target *exit) int {
 		}
 	}
 	return -1
+}
+
+// bindAffinityLocked remembers which exit serves one conversation. The map is
+// bounded: when it is full, an arbitrary conversation loses its pin and the
+// next turn re-binds through the ring, which is no worse than the old behavior.
+func (p *Pool) bindAffinityLocked(affinity string, e *exit) {
+	if _, exists := p.affinity[affinity]; !exists && len(p.affinity) >= maxAffinity {
+		for key := range p.affinity {
+			delete(p.affinity, key)
+			break
+		}
+	}
+	p.affinity[affinity] = e
 }
 
 func (p *Pool) needsRefillLocked() bool {

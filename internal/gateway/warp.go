@@ -221,8 +221,13 @@ func warpFailReason(err error) string {
 // feeds the outcome back into the pool, and returns the response with a body
 // that releases the exit when closed. The egress label is returned for
 // telemetry ("warp:<public address>").
-func (g *Gateway) doWARPAttempt(ctx context.Context, req *http.Request, baseURL, model string, firstEventTimeout time.Duration) (*http.Response, string, error) {
-	lease, err := g.warp.Acquire(ctx)
+//
+// defer429 leaves a 429 unreported to the pool: the caller is validating
+// whether the rejection follows the session or the exit, and retiring the exit
+// before that answer is known would burn a healthy egress for the whole quota
+// cooldown. The caller must report the exit itself when the validation fails.
+func (g *Gateway) doWARPAttempt(ctx context.Context, req *http.Request, baseURL, model string, firstEventTimeout time.Duration, defer429 bool, affinity string) (*http.Response, string, error) {
+	lease, err := g.warp.AcquireFor(ctx, affinity)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, "", ctx.Err()
@@ -250,12 +255,43 @@ func (g *Gateway) doWARPAttempt(ctx context.Context, req *http.Request, baseURL,
 		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
 			body = peekResponseBody(resp)
 		}
-		g.warp.Report(lease, resp.StatusCode, body, parseRetryAfter(resp.Header.Get("Retry-After")))
+		if resp.StatusCode == http.StatusTooManyRequests && len(body) > 0 {
+			snippet := string(body)
+			if len(snippet) > 240 {
+				snippet = snippet[:240]
+			}
+			// The body says whether the 429 is a session quota or an exit rate
+			// limit; that distinction is the whole reason the caller defers the
+			// penalty, so the anonymous lane logs it normally. Other lanes keep
+			// it behind -debug: they do not act on it.
+			if defer429 {
+				g.logger.Info("free tier returned 429", "component", "upstream", "event", "free_tier_429_body", "status", resp.StatusCode, "snippet", snippet, "deferred", defer429)
+			} else {
+				g.logger.Debug("free tier returned 429", "component", "upstream", "event", "free_tier_429_body", "status", resp.StatusCode, "snippet", snippet, "deferred", defer429)
+			}
+		}
+		if !(defer429 && resp.StatusCode == http.StatusTooManyRequests) {
+			g.warp.Report(lease, resp.StatusCode, body, parseRetryAfter(resp.Header.Get("Retry-After")))
+		}
 	}
 	body := &warpBody{ReadCloser: resp.Body, lease: owned, diagnostic: diagnostic}
 	body.start()
 	resp.Body = body
 	return resp, label, nil
+}
+
+// penalizeHeldEgress retires the exit whose first 429 was deferred for session
+// validation, once the rotated session is rejected as well. The egress label is
+// the one doWARPAttempt returned ("warp:<public address>").
+func (g *Gateway) penalizeHeldEgress(label string, resp *http.Response) {
+	if g.warp == nil || label == "" || resp == nil {
+		return
+	}
+	key := strings.TrimPrefix(label, "warp:")
+	body := peekResponseBody(resp)
+	if g.warp.PenalizeEgress(key, resp.StatusCode, body, parseRetryAfter(resp.Header.Get("Retry-After"))) {
+		g.logger.Warn("held WARP exit failed session validation; retiring it", "component", "upstream", "event", "held_egress_retired", "proxy", label, "status", resp.StatusCode)
+	}
 }
 
 // setWarpEgress records the exit that actually carries the attempt so request
@@ -297,9 +333,12 @@ func (g *Gateway) doWarpAnonymousUpstream(ctx context.Context, route models.Rout
 	for index, baseURL := range upstreams {
 		prepared[index], renames[index] = prepareAnonymousBody(rawBody, protocol, models.IsV1Upstream(baseURL))
 	}
-	// A 429 is scoped to the exit that carried it, so the request keeps
-	// rotating exits until the configured attempt budget is spent; only then
-	// does the last 429 reach the client.
+	// A 429 on the free tier can belong to the exit or to the session. The
+	// first 429 of a request is validated against the session: the exit is
+	// not reported to the pool, the session id is rotated, and the request is
+	// retried. Only a second 429 retires the exit. Rotating exits first, as
+	// this lane used to, spends the whole warm pool on a spent conversation
+	// without ever fixing the request.
 	limit := g.cfg.Retry.MaxAttempts
 	if limit < 1 {
 		limit = 1
@@ -309,6 +348,14 @@ func (g *Gateway) doWarpAnonymousUpstream(ctx context.Context, route models.Rout
 	var lastErr error
 	blocked, halted := false, false
 	attempts := 0
+	// baseIDs is the conversation identity derived from the client; currentIDs
+	// is the generation actually sent upstream. The guard keys rotations on the
+	// base id, so every later request of this conversation resolves the same
+	// replacement instead of replaying a spent session.
+	baseIDs := ids
+	currentIDs := g.sessions.ResolveIDs(ids)
+	validateSession := true
+	heldEgress := ""
 	for attempts < limit {
 		if ctx.Err() != nil {
 			if lastErr == nil {
@@ -331,13 +378,13 @@ func (g *Gateway) doWarpAnonymousUpstream(ctx context.Context, route models.Rout
 				httpx.DrainAndClose(lastResponse.Body)
 				lastResponse = nil
 			}
-			req, err := upstreamRequest(ctx, baseURL, protocol, prepared[index], ids, anonymousZenKey)
+			req, err := upstreamRequest(ctx, baseURL, protocol, prepared[index], currentIDs, anonymousZenKey)
 			if err != nil {
 				return nil, err, attempts
 			}
 			setRequestCredential(ctx, config.TierZen, "anonymous", "anonymous", true, nil)
 			started := time.Now()
-			resp, egress, err := g.doWARPAttempt(ctx, req, baseURL, route.ID, firstEventTimeout)
+			resp, egress, err := g.doWARPAttempt(ctx, req, baseURL, route.ID, firstEventTimeout, validateSession, baseIDs.Session)
 			duration := time.Since(started)
 			if ctx.Err() != nil {
 				lastResponse, lastErr = resp, err
@@ -372,6 +419,25 @@ func (g *Gateway) doWarpAnonymousUpstream(ctx context.Context, route models.Rout
 				g.logger.Warn("upstream rejected the request; not trying other upstreams", "component", "upstream", "event", "deterministic_rejection", "request_id", ids.Request, "attempt", attempts, "tier", config.TierZen, "upstream", config.RedactURL(baseURL), "status", status, "duration_ms", duration.Milliseconds())
 				break
 			}
+			if status == http.StatusTooManyRequests {
+				// Hold the first 429 against the session, not the exit. The
+				// retry doubles as the validation: a 2xx on the rotated session
+				// proves the exit was healthy and the conversation was spent.
+				// A second 429 proves the opposite, so the held exit is retired
+				// now even though its report was deferred.
+				if heldEgress != "" && !validateSession {
+					g.penalizeHeldEgress(heldEgress, resp)
+					heldEgress = ""
+				}
+				rotated := g.sessions.RotateIDs(baseIDs)
+				g.logger.Info("free tier 429; rotating the session identity", "component", "upstream", "event", "session_identity_rotated", "request_id", ids.Request, "attempt", attempts, "tier", config.TierZen, "upstream", config.RedactURL(baseURL), "proxy", egress, "from_session", currentIDs.Session, "to_session", rotated.Session, "generation", g.sessions.Generation(baseIDs.Session), "exit_held", validateSession)
+				if validateSession {
+					heldEgress = egress
+				}
+				currentIDs = rotated
+				validateSession = false
+				break
+			}
 			g.logger.Debug("anonymous WARP upstream returned an error response; trying the next upstream or exit", "component", "upstream", "event", "anonymous_attempt_response_failed", "request_id", ids.Request, "attempt", attempts, "tier", config.TierZen, "upstream", config.RedactURL(baseURL), "key_id", "anonymous", "channel", "anonymous", "anonymous", true, "proxy", egress, "status", status, "duration_ms", duration.Milliseconds())
 			if index+1 < len(upstreams) {
 				break
@@ -391,6 +457,9 @@ func (g *Gateway) doWarpAnonymousUpstream(ctx context.Context, route models.Rout
 		return lastResponse, errDeterministicClientRejection, attempts
 	}
 	if lastResponse != nil {
+		if meta := telemetry.MetaFromContext(ctx); meta != nil && upstreamStatus(lastResponse) == http.StatusTooManyRequests {
+			meta.RouteError = "free_tier_429_after_session_rotation"
+		}
 		if blocked {
 			return lastResponse, errFreeTierIPBlocked, attempts
 		}

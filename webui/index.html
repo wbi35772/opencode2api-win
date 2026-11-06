@@ -942,6 +942,22 @@
                         仅在使用 IPv6 网络栈时生效。每个 WARP 出口从该前缀取一个源地址出网，换出口即换公网地址；留空则共用本机默认源地址。
                       </p>
                     </div>
+                    <div class="field full">
+                      <label class="check">
+                        <input id="c-warp-tun" type="checkbox" />
+                        <span data-i18n="config.warp.tun">经本地 TUN 转发 WARP 握手（跟随系统路由）</span>
+                      </label>
+                      <p class="section-caption" data-i18n="config.warp.tun.hint">
+                        开启后不把 WARP 外层 UDP 钉在物理网卡上，也不使用外层源前缀，握手跟随系统默认路由；用于直连不通、需要经代理客户端 TUN 转发的场景。关闭时保持物理网卡直连。
+                      </p>
+                    </div>
+                    <div class="field full">
+                      <label for="c-warp-socks" data-i18n="config.warp.socks">外层 SOCKS5 UDP 中继</label>
+                      <input id="c-warp-socks" placeholder="socks5://127.0.0.1:1080" />
+                      <p class="section-caption" data-i18n="config.warp.socks.hint">
+                        把 WARP 外层 UDP 交给 SOCKS5 代理的 UDP ASSOCIATE 转发（支持 socks5://user:pass@host:port 或 host:port）。适用于本机 UDP 被阻断、但代理客户端能转发 UDP 的网络；开启后外层源前缀不再生效。留空保持直连。
+                      </p>
+                    </div>
                   </div>
                 </section>
               </div>

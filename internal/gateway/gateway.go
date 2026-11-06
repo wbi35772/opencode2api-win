@@ -93,6 +93,10 @@ type Gateway struct {
 	// freeTierBlock is how long an exit the free tier flagged stays out of the
 	// anonymous cursor. Zero uses freeTierBlockTTL.
 	freeTierBlock time.Duration
+	// sessions moves a conversation to a fresh upstream session identity when
+	// the free tier reports that session's quota as spent. The quota follows
+	// the session, so rotating exits alone cannot recover it.
+	sessions *sessionGuard
 }
 
 // New builds a Gateway for cfg: one proxy transport per runtime proxy (a
@@ -135,6 +139,7 @@ func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Metrics, war
 		monitor:        monitor,
 		attemptTimeout: attemptDeadline(cfg),
 		freeTierBlock:  time.Duration(cfg.Performance.FreeTierBlockSeconds) * time.Second,
+		sessions:       newSessionGuard(),
 	}, nil
 }
 

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun/netstack"
 )
@@ -94,19 +95,28 @@ type exit struct {
 	refs      int
 	retired   bool
 	closed    bool
-	penalty   penaltyKind
+	penalty    penaltyKind
+	inFlight   int
 	closeOnce sync.Once
 }
 
 func newExit(ctx context.Context, reg registration) (*exit, error) {
-	return newExitWithStack(ctx, reg, DefaultStack, netip.Addr{}, nil)
+	return newExitWithStack(ctx, reg, DefaultStack, netip.Addr{}, nil, false)
 }
 
 // newExitWithStack builds one userspace tunnel for reg. A valid source pins
 // the outer WireGuard socket to that address and restricts the peer endpoints
 // to IPv6, so the public egress is derived from the rotating source rather than
 // from whatever address the host happens to share.
-func newExitWithStack(ctx context.Context, reg registration, stack Stack, source netip.Addr, log logger) (*exit, error) {
+func newExitWithStack(ctx context.Context, reg registration, stack Stack, source netip.Addr, log logger, tun bool) (*exit, error) {
+	return newExitWithRelay(ctx, reg, stack, source, log, tun, nil, nil)
+}
+
+// newExitWithRelay is newExitWithStack with an optional SOCKS5 UDP relay for the
+// outer WireGuard datagrams. A relay takes over the outer source, so source is
+// ignored when relay is set; relayGuard, when set, receives the tunnel's health
+// so one shared circuit protects every exit of the pool.
+func newExitWithRelay(ctx context.Context, reg registration, stack Stack, source netip.Addr, log logger, tun bool, relay *socks5Proxy, relayGuard *relayGuard) (*exit, error) {
 	normalized, err := ParseStack(string(stack))
 	if err != nil {
 		return nil, err
@@ -160,13 +170,18 @@ func newExitWithStack(ctx context.Context, reg registration, stack Stack, source
 		tunDevice.Close()
 		return nil, err
 	}
-	if source.IsValid() {
+	if relay != nil {
+		// A relayed socket reaches the proxy, usually over IPv4, and the
+		// destination family no longer constrains the outer route. Try the
+		// more common IPv4 Cloudflare endpoints first.
+		endpoints = preferIPv4Endpoints(endpoints)
+	} else if source.IsValid() {
 		// Try IPv6 endpoints first so the rotating source is used, but keep
 		// the IPv4 ones behind them: a host (or network) that cannot reach
 		// Cloudflare over IPv6 still gets a working tunnel, just with the
 		// shared address the prefix was supposed to avoid.
 		endpoints = preferIPv6Endpoints(endpoints)
-	} else if outerInterfacePinned() {
+	} else if !tun && outerInterfacePinned() {
 		// The socket leaves through the physical adapter, and that adapter's
 		// IPv6 route is the one that tends to be missing on a home network. A
 		// dead IPv6 endpoint costs a full probe timeout before the IPv4 one is
@@ -175,7 +190,11 @@ func newExitWithStack(ctx context.Context, reg registration, stack Stack, source
 		endpoints = preferIPv4Endpoints(endpoints)
 	}
 	endpoints = diversifyEndpoints(endpoints, probeCandidates)
-	wg := device.NewDevice(tunDevice, &simpleBind{source: source, log: log}, device.NewLogger(device.LogLevelError, "warp: "))
+	var binder conn.Bind = &simpleBind{source: source, log: log, tun: tun}
+	if relay != nil {
+		binder = newSocksUDPBind(*relay, relayGuard, log, tun)
+	}
+	wg := device.NewDevice(tunDevice, binder, device.NewLogger(device.LogLevelError, "warp: "))
 	uapi := fmt.Sprintf(
 		"private_key=%s\npublic_key=%s\nallowed_ip=0.0.0.0/0\nallowed_ip=::/0\nendpoint=%s\npersistent_keepalive_interval=25\n",
 		privateKey, peerKey, endpoints[0],
@@ -601,15 +620,19 @@ func parseTrace(body io.Reader) (netip.Addr, error) {
 func (e *exit) addRef() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.retired || e.closed {
+	if e.retired || e.closed || e.inFlight >= 3 {
 		return false
 	}
 	e.refs++
+	e.inFlight++
 	return true
 }
 
 func (e *exit) release() {
 	e.mu.Lock()
+	if e.inFlight > 0 {
+		e.inFlight--
+	}
 	if e.refs > 0 {
 		e.refs--
 	}

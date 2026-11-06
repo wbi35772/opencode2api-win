@@ -101,23 +101,22 @@ OPENAI_API_KEY=sk-win-local-test
 
 ## 当前状态说明
 
-当前配置是 **WARP 开启、`proxies` 为 `http://127.0.0.1:29090` + `direct`**，实测通过：
+当前配置是 **WARP 开启、`warp.tun: true`、`warp.socks_udp: socks5://127.0.0.1:10808`**：注册 HTTPS 走 `proxies[0]`（同一个 v2rayN 节点），WireGuard 外层 UDP 走该节点的 SOCKS5 UDP ASSOCIATE。目标站看到的仍是 Cloudflare 分配的 WARP IPv6，不是 10808 节点的公网 IP。实测通过：
 
-- WARP 池约 18 秒就绪，`pool_size: 3`，3 个出口全部预热（旧版本只预热一半）
-- 连续 8 次免费请求全部 `200`
-- 线上连打 5 次：`200 2.61s / 2.93s / 2.72s / 7.90s / 2.77s`
-- `/healthz` 返回 `status: ok`、`models.stale: false`、`warp.status: ready`，`preload` 等于 `size`
-- 带 Key 的 `/v1/models` 返回 8 个免费模型
+- WARP 池 `pool_size: 12`，启动后 `active=8`、`standby=8`（超过 8 的部分按并发扩容）
+- 单请求免费模型 `200`（6.6 秒）；3 并发 `3/3 200`，其中一条为 `429 → 429 → 200` 的会话/出口轮换
+- 独立实例验证：SOCKS5 UDP ASSOCIATE 收到 STUN 回包（`162.159.207.0:3478`），真实请求日志为 `proxy":"warp:2a09:bac5:c82d:1678::/64"`
+- `/healthz` 返回 `status: ok`、`warp.status: ready`；`go test ./...` 通过
 
 WARP 在进程内用 netstack 完成，本机不会新增网卡、不会改默认路由，**只有网关进程自己走 WARP**；OpenCode 原生客户端直连 opencode.ai 时用的是你本机的真实 IP，两者额度互不影响。细节见 [`doc/03-网络-WARP-与出口.md`](doc/03-网络-WARP-与出口.md)。
 
 ### 如果 WARP 起不来
 
-启动时最多等 60 秒，拿不到出口就以"WARP 未启用"继续跑，28080/28081 照常监听，随后在后台按 15s→30s→1m→2m→5m 自动重试，成功后热切换回 WARP，不需要重启。日志里是 `warp_startup_fallback`，恢复时是 `WARP egress recovered in the background`。
+启动时最多等 60 秒，拿不到出口就以"WARP 未启用"继续跑，28080/28081 照常监听，随后在后台按 15s→30s→1m→2m→5m 自动重试，成功后热切换回 WARP，不需要重启。日志里是 `warp_startup_fallback`，恢复时是 `WARP egress recovered in the background`。配置 `socks_udp` 时，启动前还会做 TCP + UDP preflight；代理不支持 UDP 会直接降级，不会消耗设备注册。
 
 判断 WARP 能不能用的标准是**本机能否连上 `api.cloudflareclient.com`（注册）以及到 WARP endpoint 的 UDP 2408**。日志里那个 `1.1.1.1/cdn-cgi/trace` 是在隧道内部访问的，本机直连连不上 1.1.1.1 并不影响 WARP——实测本机 1.1.1.1 一直超时的那段时间 WARP 照样 8/8 通。
 
-**TUN 模式已经不影响 WARP。** 注册用的 HTTPS 和 WireGuard 的 UDP 都钉在物理网卡上，开着 sing-box / v2rayN 的 TUN 实测串行 8/8、并发 6/6 全通，期间还能注册出新出口。只有"物理网卡到不了 Cloudflare、只有 TUN 能到"这种反过来的情况，才需要 `set OPENCODE2API_WARP_NO_PIN=1` 启动。
+**当前配置下 TUN 模式不影响 WARP。** 注册和 WireGuard UDP 都走回环 SOCKS5（`127.0.0.1:10808`），不经过系统默认路由，所以 v2rayN 的 TUN 开关不会吞掉握手。若 `socks_udp` 为空、外层 UDP 直连，则仍按物理网卡钉选，只有"物理网卡到不了 Cloudflare、只有 TUN 能到"时才需要 `set OPENCODE2API_WARP_NO_PIN=1`。
 
 如果不想用 WARP：
 
@@ -132,9 +131,21 @@ WARP 在进程内用 netstack 完成，本机不会新增网卡、不会改默�
 
 | 方案 | 成功率实测 | 平均延迟 | 依赖 |
 |---|---|---|---|
-| WARP（当前） | 8/8、5/5；TUN 下 8/8 + 6/6 | 约 3.5s | 本机能到 Cloudflare |
+| WARP（当前，经 `socks_udp`） | 单请求 + 3 并发全 200；历史直连 UDP 8/8、5/5 | 约 3–7s | 本机能到 Cloudflare；10808 支持 UDP ASSOCIATE |
 | 直连 `direct` | 连接 20/20 | 约 1.3s | 免费额度按本机 IP，很快就 429 |
 | 本地代理 `10808` | **9/20** | 约 1.5s | v2rayN 必须在线，且会丢一半连接 |
+
+### 会话粘性与 429
+
+免费额度的计量单位是 **(会话, 出口)** 这一对，不是单纯的出口 IP。会话换了出口，或出口被这个会话用满，上游都会回 429。网关按下面的顺序处理：
+
+1. **会话钉出口**：同一个会话（`x-session-id` / `x-opencode-session`，没有就用会话首条消息的指纹）始终走同一个 WARP 出口。旧实现每个请求轮换出口，于是每一轮都像"新出口 + 旧会话"，第一个请求就 429。
+2. **第一次 429 换会话、不换出口**：判定为会话额度用尽，会话 id 升一代（日志 `session_identity_rotated`，带 `generation` 和 `from_session`/`to_session`），在**同一个出口**上重试。重试 200 就证明出口是好的，不退役。
+3. **第二次 429 才退役出口**：同一出口 + 新会话还是 429，说明出口真的坏了，才把这个 `/64` 冷却 24h（日志 `held_egress_retired`），换下一个出口并重新钉住会话。
+
+实测（2026-11-03，WARP 12 出口）：连续 10 次、并发 6 次、6 轮 15k token 长上下文，全部 `200`、`attempts=1`，没有 429，也没有出口被退役。改之前同样的 10 次里几乎每次都是 `anon:429` + 轮换出口。
+
+`warp.tun` 只影响非回环代理/直连 UDP 的网卡选择：`true` 跟随系统默认路由，`false` 钉物理网卡。当前 `socks_udp` 是回环地址，两种取值都不改变中继路径；如果代理本身挂了，共享熔断会快速失败，不会无限重试。
 
 ## 修改配置
 
@@ -147,8 +158,10 @@ WARP 在进程内用 netstack 完成，本机不会新增网卡、不会改默�
   "anonymous": true,
   "warp": {
     "enabled": true,
-    "pool_size": 4,
+    "pool_size": 12,
     "stack": "ipv6",
+    "tun": true,
+    "socks_udp": "socks5://127.0.0.1:10808",
     "source_ipv6": ""
   },
   "proxies": ["direct"],

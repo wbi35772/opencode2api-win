@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -95,16 +96,21 @@ type registrar struct {
 	blockedTill time.Time
 }
 
-func newRegistrar(log logger, proxy *url.URL) *registrar {
+func newRegistrar(log logger, proxy *url.URL, tun bool) *registrar {
 	// Registration is plain HTTPS, so a TUN device that owns the default route
 	// captures it just like it captures the WireGuard UDP. Pinning the dialer
 	// to the physical adapter keeps the whole WARP bootstrap independent of the
-	// host's proxy tunnel; interfaceControl returns nil when no usable adapter
-	// is found, and then the client routes normally.
+	// host's proxy tunnel; TUN mode disables that pin so the handshake follows
+	// the system route instead. interfaceControl returns nil when no usable
+	// adapter is found, and then the client routes normally.
+	var control func(string, string, syscall.RawConn) error
+	if !tun {
+		control = interfaceControl("tcp4", log)
+	}
 	dialer := &net.Dialer{
 		Timeout:   15 * time.Second,
 		KeepAlive: 30 * time.Second,
-		Control:   interfaceControl("tcp4", log),
+		Control:   control,
 	}
 	transport := &http.Transport{
 		Proxy:               nil,

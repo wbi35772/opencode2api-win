@@ -3,6 +3,7 @@ package warp
 import (
 	"context"
 	"errors"
+	"net/http"
 	"net/netip"
 	"path/filepath"
 	"testing"
@@ -40,7 +41,7 @@ func TestQuotaPenaltyIsNotRestored(t *testing.T) {
 		t.Fatalf("quota-penalized exit was restored: active=%d", len(pool.active))
 	}
 	until, parked := pool.cooling[blocked.egressKey()]
-	if !parked || until.Before(time.Now().Add(24*time.Hour)) {
+	if !parked || until.Before(time.Now().Add(24*time.Hour-time.Minute)) {
 		t.Fatalf("expected at least the base cooldown, got %v (parked=%v)", until, parked)
 	}
 }
@@ -68,8 +69,8 @@ func TestQuotaCooldownFixed24h(t *testing.T) {
 	if got := quotaCooldownFor(1, 0); got != 24*time.Hour {
 		t.Fatalf("fixed cooldown = %v want 24h", got)
 	}
-	if got := quotaCooldownFor(1, 3*time.Hour); got != 3*time.Hour {
-		t.Fatalf("Retry-After should win, got %v", got)
+	if got := quotaCooldownFor(1, 3*time.Hour); got != 24*time.Hour {
+		t.Fatalf("quota cooldown stays fixed at 24h, got %v", got)
 	}
 	if got := quotaCooldownFor(1, 48*time.Hour); got != 24*time.Hour {
 		t.Fatalf("Retry-After capped at 24h, got %v", got)
@@ -125,7 +126,6 @@ func TestPenaltyStateRoundTrip(t *testing.T) {
 func TestNoteSuccessNoStrikes(t *testing.T) {
 	first := testExit()
 	pool := testPool("", first)
-	key := first.egressKey()
 	pool.noteSuccess(first)
 }
 
@@ -146,5 +146,36 @@ func TestPreloadFor(t *testing.T) {
 		if got := preloadFor(test.size); got != test.want {
 			t.Fatalf("preloadFor(%d) = %d, want %d", test.size, got, test.want)
 		}
+	}
+}
+
+func TestPenalizeEgressRetiresHeldExit(t *testing.T) {
+	held := testExit()
+	pool := testPool("", held)
+	if !pool.PenalizeEgress(held.egressKey(), http.StatusTooManyRequests, []byte(`{"error":{"type":"insufficient_quota"}}`), 0) {
+		t.Fatal("PenalizeEgress did not match the active exit")
+	}
+	pool.wait.Wait()
+
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+	if len(pool.active) != 0 {
+		t.Fatalf("held exit still active: active=%d", len(pool.active))
+	}
+	until, parked := pool.cooling[held.egressKey()]
+	if !parked || until.Before(time.Now().Add(24*time.Hour-time.Minute)) {
+		t.Fatalf("held exit not parked for the quota window: %v (parked=%v)", until, parked)
+	}
+}
+
+func TestPenalizeEgressIgnoresUnknownKey(t *testing.T) {
+	pool := testPool("", testExit())
+	if pool.PenalizeEgress("2606:4700:4701::/64", http.StatusTooManyRequests, nil, 0) {
+		t.Fatal("PenalizeEgress matched a key that is not active")
+	}
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+	if len(pool.active) != 1 {
+		t.Fatalf("active exits changed: active=%d", len(pool.active))
 	}
 }

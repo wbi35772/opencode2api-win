@@ -281,6 +281,12 @@ const DICTIONARY = {
       "config.warp.source": "Outer IPv6 source prefix (/64)",
       "config.warp.source.hint":
         "Used only with the IPv6 network stack. Every WARP exit binds one source address from this prefix, so replacing an exit also replaces its public egress; leave empty to share this host's default source address.",
+      "config.warp.tun": "Carry the WARP handshake through a local TUN (follow the system route)",
+      "config.warp.tun.hint":
+        "When on, the outer WARP UDP is not pinned to the physical adapter and the outer source prefix is ignored; the handshake follows the system default route. Use it when the direct route is blocked and a proxy client's TUN must carry the handshake. Off keeps the physical-adapter direct path.",
+      "config.warp.socks": "Outer SOCKS5 UDP relay",
+      "config.warp.socks.hint":
+        "Send the outer WARP UDP through a SOCKS5 proxy's UDP ASSOCIATE (socks5://user:pass@host:port or host:port). Use it when this host cannot send UDP directly but the proxy client can forward it; the outer source prefix no longer applies. Leave empty to keep the direct socket.",
       "config.upstream.title": "Upstream and protocol routing",
       "config.upstream.caption":
         "anonymous will use every available proxy; an explicit protocol mapping wins over inferring the protocol from the model name.",
@@ -860,6 +866,12 @@ const DICTIONARY = {
       "config.warp.source": "Tiền tố nguồn IPv6 bên ngoài (/64)",
       "config.warp.source.hint":
         "Chỉ dùng với ngăn xếp mạng IPv6. Mỗi đầu ra WARP gắn một địa chỉ nguồn trong tiền tố này, nên khi thay đầu ra là thay luôn địa chỉ công cộng; để trống sẽ dùng địa chỉ nguồn mặc định của máy chủ.",
+      "config.warp.tun": "Chuyển bắt tay WARP qua TUN cục bộ (theo tuyến hệ thống)",
+      "config.warp.tun.hint":
+        "Khi bật, UDP WARP bên ngoài không bị ghim vào card mạng vật lý và tiền tố nguồn bị bỏ qua; bắt tay đi theo tuyến mặc định của hệ thống. Dùng khi tuyến trực tiếp bị chặn và cần TUN của ứng dụng proxy chuyển tiếp bắt tay. Khi tắt, giữ đường trực tiếp qua card vật lý.",
+      "config.warp.socks": "Chuyển tiếp UDP SOCKS5 bên ngoài",
+      "config.warp.socks.hint":
+        "Gửi UDP WARP bên ngoài qua UDP ASSOCIATE của proxy SOCKS5 (socks5://user:pass@host:port hoặc host:port). Dùng khi máy này không thể gửi UDP trực tiếp nhưng ứng dụng proxy chuyển tiếp được; tiền tố nguồn bên ngoài không còn áp dụng. Để trống để giữ socket trực tiếp.",
       "config.upstream.title": "Upstream và định tuyến giao thức",
       "config.upstream.caption":
         "anonymous sẽ dùng hết các Proxy khả dụng; ánh xạ protocol tường minh được ưu tiên hơn việc suy luận từ tên mô hình.",
@@ -1442,6 +1454,12 @@ const DICTIONARY = {
       "config.warp.source": "Prefisso sorgente IPv6 esterno (/64)",
       "config.warp.source.hint":
         "Usato solo con lo stack IPv6. Ogni uscita WARP associa un indirizzo sorgente da questo prefisso, quindi sostituire un'uscita sostituisce anche l'indirizzo pubblico; lascia vuoto per usare l'indirizzo sorgente predefinito dell'host.",
+      "config.warp.tun": "Porta l'handshake WARP attraverso un TUN locale (segui la rotta di sistema)",
+      "config.warp.tun.hint":
+        "Se attivo, l'UDP WARP esterno non viene agganciato alla scheda fisica e il prefisso sorgente viene ignorato; l'handshake segue la rotta predefinita di sistema. Usalo quando la rotta diretta è bloccata e serve il TUN di un client proxy. Disattivato mantiene il percorso diretto sulla scheda fisica.",
+      "config.warp.socks": "Relay UDP SOCKS5 esterno",
+      "config.warp.socks.hint":
+        "Invia l'UDP WARP esterno attraverso l'UDP ASSOCIATE di un proxy SOCKS5 (socks5://user:pass@host:port oppure host:port). Usalo quando questo host non può inviare UDP direttamente ma il client proxy può inoltrarlo; il prefisso sorgente esterno non si applica più. Lascia vuoto per mantenere il socket diretto.",
       "config.upstream.title": "Upstream e instradamento protocolli",
       "config.upstream.caption":
         "anonymous userà ogni proxy disponibile; una mappatura esplicita di protocollo prevale sull'inferenza del protocollo dal nome del modello.",

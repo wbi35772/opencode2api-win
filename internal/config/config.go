@@ -81,6 +81,18 @@ type WarpConfig struct {
 	// replacement exit a new public egress; without it, exits share one
 	// address and an egress-scoped free quota stays exhausted.
 	SourceIPv6 string `json:"source_ipv6,omitempty"`
+	// SocksUDP relays the outer WireGuard datagrams through a SOCKS5 proxy's
+	// UDP ASSOCIATE (socks5://[user:pass@]host:port, or a bare host:port).
+	// Enable it when this host cannot send UDP directly but the proxy client
+	// can forward it. Empty keeps the direct socket. A relay owns the outer
+	// source, so SourceIPv6 does not apply; TUN still selects the registration
+	// route.
+	SocksUDP string `json:"socks_udp,omitempty"`
+	// TUN makes the WARP sockets follow the host's system route instead of
+	// pinning the outer UDP to the physical adapter and binding the configured
+	// outer source. Enable it when a local TUN (for example a proxy client's
+	// TUN mode) must carry the WireGuard handshake.
+	TUN bool `json:"tun,omitempty"`
 }
 
 // Normalize fills the defaults and canonicalizes the stack name.
@@ -112,6 +124,17 @@ func (w *WarpConfig) Normalize() error {
 			return errors.New("warp.source_ipv6 requires warp.stack to be \"ipv6\"; an IPv4 stack cannot present an IPv6 egress")
 		}
 		w.SourceIPv6 = prefix.Masked().String()
+	}
+	w.SocksUDP = strings.TrimSpace(w.SocksUDP)
+	if w.SocksUDP != "" {
+		normalized, err := warp.NormalizeSocksUDP(w.SocksUDP)
+		if err != nil {
+			return fmt.Errorf("warp.socks_udp: %w", err)
+		}
+		if w.SourceIPv6 != "" {
+			return errors.New("warp.socks_udp cannot be combined with warp.source_ipv6: the relay owns the outer source")
+		}
+		w.SocksUDP = normalized
 	}
 	return nil
 }

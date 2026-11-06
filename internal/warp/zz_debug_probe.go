@@ -29,7 +29,7 @@ type DebugResult struct {
 // endpoint with a fresh tunnel, reporting the first successful egress.
 func DebugProbeSession(ctx context.Context, proxy *url.URL, endpoints []string) ([]DebugResult, error) {
 	log := debugLogger{}
-	reg, err := newRegistrar(log, proxy).register(ctx)
+	reg, err := newRegistrar(log, proxy, false).register(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +38,7 @@ func DebugProbeSession(ctx context.Context, proxy *url.URL, endpoints []string) 
 		attemptCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
 		reg.Endpoint = endpoint
 		reg.Endpoints = []string{endpoint}
-		e, err := newExitWithStack(attemptCtx, reg, StackIPv6, netip.Addr{}, log)
+		e, err := newExitWithStack(attemptCtx, reg, StackIPv6, netip.Addr{}, log, false)
 		cancel()
 		if err != nil {
 			results = append(results, DebugResult{Endpoint: endpoint, Err: err})

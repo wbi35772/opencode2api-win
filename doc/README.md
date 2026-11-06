@@ -14,6 +14,7 @@
 | [06-架构说明.md](06-架构说明.md) | 代码分层、请求路径、WARP 池、进程生命周期、扩展点 |
 | [07-已知问题与限制.md](07-已知问题与限制.md) | 已修/未修问题、环境约束、如何确认问题是否还在 |
 | [08-备份与恢复.md](08-备份与恢复.md) | 仓库拓扑、入库范围、换机恢复、Release 资产、完整性检查 |
+| [09-WARP-SOCKS5-UDP-基线.md](09-WARP-SOCKS5-UDP-基线.md) | 当前部署基线、SOCKS5 UDP 数据路径、验证记录、换节点与回滚 |
 
 ## 一分钟速查
 
@@ -28,18 +29,16 @@
 | 健康检查 | `curl.exe --noproxy "*" http://127.0.0.1:28080/healthz` |
 | 日志 | `logs\stdout.log`、`logs\stderr.log`、`logs\pid.txt` |
 
-## 当前运行状态（2026-11-01 实测）
+## 当前运行状态（2026-11-05 实测）
 
 ```json
 {"status":"ok","ready":true,
- "models":{"status":"ready","total":78,"exposed":8,"stale":false},
- "proxies":{"total":2,"healthy":2},
- "warp":{"status":"ready","stack":"ipv6","size":3,"preload":3,"active":3,"standby":3,"cooling":23}}
+ "warp":{"status":"ready","stack":"ipv6","size":12,"preload":8,"active":8,"standby":8,"cooling":61}}
 ```
 
-- WARP 已开启，`pool_size=3`，3 个出口全部预热（最多预热 8 个）
-- 连续 5 次免费模型对话全部 200，耗时 2.6–7.9 秒
-- 模型目录在线刷新成功，`degraded` 告警已消失
+- WARP 已开启，`pool_size=12`，8 个出口常热，其余按并发扩容
+- WireGuard 外层 UDP 经 `socks_udp=socks5://127.0.0.1:10808` 中继；注册 HTTPS 走同一个 `proxies[0]`
+- 单请求与 3 并发全部 200；3 并发中一条为 `429 → 429 → 200`
 - `cooling` 是历史 `/64` 的冷却记录数，不代表当前不可用
 
 ## 目录约定

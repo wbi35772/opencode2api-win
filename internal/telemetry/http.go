@@ -51,6 +51,13 @@ type RequestMeta struct {
 	UsageReported  bool
 	AttemptOutcome string
 	Outcome        string
+	// Routing diagnostics — these come from UI / admin debug endpoints
+	Egress         string // WARP /64 or IPv4 /32 exit key
+	ExitID         string // WARP exit device UUID
+	CooldownUntil  time.Time // when this egress block is cooled (24h blacklist)
+	PenaltyKind    string // transport / quota / none
+	RouteNative    string // native protocol of the routed tier
+	RouteError     string // routing error if unavailable
 }
 
 // PlaygroundServerKey buckets admin Playground traffic, which authenticates
@@ -140,10 +147,15 @@ func Middleware(monitor *Metrics, logger *slog.Logger, next http.Handler) http.H
 				outcome = requestOutcome(status, meta.Channel)
 			}
 			if meta.Channel != "" {
+				cooldownStr := ""
+				if meta.CooldownUntil.Year() > 1 {
+					cooldownStr = meta.CooldownUntil.Format("2006-01-02T15:04:05Z07:00")
+				}
 				logger.Info("request routed", "component", "http", "event", "request_routed", "method", r.Method,
 					"path", r.URL.Path, "status", status, "duration_ms", duration.Milliseconds(), "request_id", meta.Request,
 					"model", meta.Model, "model_alias", meta.ModelAlias, "session", meta.Session, "server_key_id", meta.ServerKeyID, "tier", meta.Tier, "key_id", meta.KeyID,
 					"channel", meta.Channel, "anonymous", meta.Anonymous, "attempts", meta.Attempts, "legs", strings.Join(meta.Legs, " "), "stream", meta.Stream, "outcome", outcome,
+					"egress", meta.Egress, "exit_id", meta.ExitID, "penalty_kind", meta.PenaltyKind, "route_native", meta.RouteNative, "route_error", meta.RouteError, "cooldown_until", cooldownStr,
 					"stop", meta.Stop, "in", meta.Usage.Input, "out", meta.Usage.Output, "reasoning_tokens", meta.Usage.Reasoning, "cached", meta.Usage.Cached, "tail", meta.Tail)
 			}
 			logger.Debug("request completed", "component", "http", "event", "request_complete", "method", r.Method,

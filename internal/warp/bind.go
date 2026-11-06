@@ -19,11 +19,22 @@ type simpleBind struct {
 	ipv6   *net.UDPConn
 	source netip.Addr
 	log    logger
+	tun    bool
 	closed bool
 }
 
 type simpleEndpoint struct {
 	addr netip.AddrPort
+}
+
+// outerControl returns the socket hook that pins the outer UDP to the host's
+// physical adapter, or nil when TUN mode asks the kernel to follow the system
+// route instead (which is what lets a local TUN carry the handshake).
+func (b *simpleBind) outerControl(network string) func(string, string, syscall.RawConn) error {
+	if b.tun {
+		return nil
+	}
+	return interfaceControl(network, b.log)
 }
 
 func (b *simpleBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
@@ -33,7 +44,7 @@ func (b *simpleBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
 		return nil, 0, conn.ErrBindAlreadyOpen
 	}
 	b.closed = false
-	if b.source.IsValid() {
+	if b.source.IsValid() && !b.tun {
 		v6, err := b.listenIPv6(port)
 		if err != nil {
 			return nil, 0, err
@@ -41,7 +52,7 @@ func (b *simpleBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
 		port = uint16(v6.LocalAddr().(*net.UDPAddr).Port)
 		// Keep an IPv4 socket as well: if no IPv6 endpoint answers, the
 		// handshake falls back to IPv4 and the tunnel still comes up.
-		v4, _ := listenUDP("udp4", &net.UDPAddr{Port: int(port)}, interfaceControl("udp4", b.log))
+		v4, _ := listenUDP("udp4", &net.UDPAddr{Port: int(port)}, b.outerControl("udp4"))
 		var receives []conn.ReceiveFunc
 		if v4 != nil {
 			receives = append(receives, receiveUDP(v4))
@@ -53,18 +64,18 @@ func (b *simpleBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
 	var v4, v6 *net.UDPConn
 	var err error
 	if port == 0 {
-		v4, err = listenUDP("udp4", &net.UDPAddr{}, interfaceControl("udp4", b.log))
+		v4, err = listenUDP("udp4", &net.UDPAddr{}, b.outerControl("udp4"))
 		if err == nil {
 			port = uint16(v4.LocalAddr().(*net.UDPAddr).Port)
 		}
 	} else {
-		v4, err = listenUDP("udp4", &net.UDPAddr{Port: int(port)}, interfaceControl("udp4", b.log))
+		v4, err = listenUDP("udp4", &net.UDPAddr{Port: int(port)}, b.outerControl("udp4"))
 	}
 	if err == nil {
-		v6, _ = listenUDP("udp6", &net.UDPAddr{Port: int(port)}, interfaceControl("udp6", b.log))
+		v6, _ = listenUDP("udp6", &net.UDPAddr{Port: int(port)}, b.outerControl("udp6"))
 	}
 	if v4 == nil && v6 == nil {
-		v6, err = listenUDP("udp6", &net.UDPAddr{Port: int(port)}, interfaceControl("udp6", b.log))
+		v6, err = listenUDP("udp6", &net.UDPAddr{Port: int(port)}, b.outerControl("udp6"))
 		if err != nil {
 			return nil, 0, err
 		}
@@ -117,11 +128,22 @@ func listenUDP(network string, address *net.UDPAddr, control func(string, string
 // socket deliberately skips interfaceControl: pinning it to a different
 // interface would contradict the address it is bound to.
 func (b *simpleBind) listenIPv6(port uint16) (*net.UDPConn, error) {
+	// Windows: freebind is no-op (!linux). If the configured outer source is
+	// stale (not assigned to a real interface, as from a previous exit or
+	// virtual adapter), the bind fails with "requested address is not valid"
+	// (WSAEINVAL). Fall back to binding any address; the OS will route out
+	// via the correct adapter, and interfaceControl already pins to the
+	// physical adapter.
 	address := net.JoinHostPort(b.source.String(), strconv.Itoa(int(port)))
 	config := net.ListenConfig{Control: freebindControl}
 	packet, err := config.ListenPacket(context.Background(), "udp6", address)
 	if err != nil {
-		return nil, fmt.Errorf("bind WARP outer source %s: %w", b.source, err)
+		packet, err2 := config.ListenPacket(context.Background(), "udp6",
+			net.JoinHostPort("::", strconv.Itoa(int(port))))
+		if err2 == nil {
+			return packet.(*net.UDPConn), nil
+		}
+		return nil, fmt.Errorf("bind WARP outer source %s (fallback :: also failed): %w; original: %v", b.source, err2, err)
 	}
 	conn, ok := packet.(*net.UDPConn)
 	if !ok {

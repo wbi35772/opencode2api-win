@@ -278,7 +278,7 @@ func (m *RuntimeController) selectWARP(cfg config.Config, warpDeadline time.Dura
 	if !cfg.Warp.Enabled {
 		return nil, "", false, nil
 	}
-	key := fmt.Sprintf("%d|%s|%s", cfg.Warp.PoolSize, cfg.Warp.Stack, cfg.Warp.SourceIPv6)
+	key := fmt.Sprintf("%d|%s|%s|%t|%s", cfg.Warp.PoolSize, cfg.Warp.Stack, cfg.Warp.SourceIPv6, cfg.Warp.TUN, cfg.Warp.SocksUDP)
 	if m.warpPool != nil && m.warpKey == key {
 		return m.warpPool, key, false, nil
 	}
@@ -309,7 +309,7 @@ func (m *RuntimeController) selectWARP(cfg config.Config, warpDeadline time.Dura
 	}
 	ctx, cancel := context.WithTimeout(m.root, timeout)
 	defer cancel()
-	pool, err := warp.NewWithOptions(ctx, m.logger, warp.Options{Size: cfg.Warp.PoolSize, Stack: warp.Stack(cfg.Warp.Stack), SourceIPv6: source, RegistryProxy: registryProxyURL(cfg), StatePath: warpStatePath(m.configPath)})
+	pool, err := warp.NewWithOptions(ctx, m.logger, warp.Options{Size: cfg.Warp.PoolSize, Stack: warp.Stack(cfg.Warp.Stack), SourceIPv6: source, RegistryProxy: registryProxyURL(cfg), StatePath: warpStatePath(m.configPath), TUN: cfg.Warp.TUN, SocksUDP: cfg.Warp.SocksUDP})
 	if err != nil {
 		return nil, "", false, warpEgressError{err}
 	}

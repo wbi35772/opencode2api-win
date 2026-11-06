@@ -161,7 +161,9 @@ verify WARP ipv4 egress: Get "https://1.1.1.1/cdn-cgi/trace": context deadline e
 
 隧道建立后的探测按顺序打两个目标：先 `https://opencode.ai/cdn-cgi/trace`（就是免费档真正要访问的域名，同时验证 DNS、TLS 和业务路径），再 `https://[2606:4700:4700::1111]/cdn-cgi/trace`。两者在同一个端点内并行，7 秒超时，最多换 6 个端点。要换第一个目标就改 `upstreamTraceURL`（`internal/warp/exit.go`）。
 
-注册（HTTPS）现在优先走 `proxies` 里第一个非 `direct` 的代理，直连作为后备：`newRegistrar(log, proxy)` 会建两个 client，代理 client 不钉网卡（否则连不到 127.0.0.1），请求失败时自动用钉选的直连 client 重发。启动日志会出现 `WARP registration uses proxy ***`。WireGuard 数据面仍然只走本机——实测 10808 的 SOCKS5 UDP ASSOCIATE 能建（relay `127.0.0.1:57258`），但 `223.5.5.5:53`、`8.8.8.8:53`、`1.1.1.1:53`、`172.65.90.20:443` 全部 8 秒无回包（0/4），节点不转发 UDP，所以隧道本身无法借用它。
+注册（HTTPS）现在优先走 `proxies` 里第一个非 `direct` 的代理，直连作为后备：`newRegistrar(log, proxy)` 会建两个 client，代理 client 不钉网卡（否则连不到 127.0.0.1），请求失败时自动用钉选的直连 client 重发。启动日志会出现 `WARP registration uses proxy ***`。
+
+WireGuard 数据面默认仍从本机直接发出；配置 `warp.socks_udp` 后改为经 SOCKS5 UDP ASSOCIATE 中继。2026-11-05 在 v2rayN/xray 10808 上实测：live STUN 收到 `162.159.207.0:3478` 回包（relay `127.0.0.1:55304`），真实免费模型请求走 `warp:2a09:bac5:c82d:1678::/64`，单请求与 3 并发均为 200。早期“节点不转发 UDP”的 0/4 记录来自另一个节点/配置，已不再适用。
 
 ## 建不出出口时：降级启动 + 后台重试
 
@@ -228,10 +230,11 @@ proxyHealthCheckInterval = 15 * time.Minute
 ## 当前选择
 
 ```json
-"warp": { "enabled": true, "pool_size": 3, "stack": "ipv6" },
-"proxies": ["direct", "http://127.0.0.1:10808"]
+"warp": { "enabled": true, "pool_size": 12, "stack": "ipv6", "tun": true,
+          "socks_udp": "socks5://127.0.0.1:10808" },
+"proxies": ["socks5://127.0.0.1:10808"]
 ```
 
-理由：匿名免费档优先走 WARP，实测 10/10、6/6 全通并真实轮换 `/64`；WARP 不可用或被额度挡住时自动回退到 `proxies`（`direct` 优先，本机 xray 10808 作为后备），注册 HTTPS 也走 10808。`pool_size` 不用开太大——`/64` 供给有限，建议 3–6；新版把额度命中按 30m→2h→8h→24h 递增并持久化，池子再大也不能凭空造出未消耗的 `/64`。
+理由：匿名免费档优先走 WARP；注册 HTTPS 走 `proxies[0]`，WireGuard 外层 UDP 经 `socks_udp` 中继到 Cloudflare。实测 SOCKS5 UDP ASSOCIATE 可用，单请求和 3 并发全部 200，目标站看到的是 WARP 分配的 IPv6。`pool_size=12` 让 8 个出口常热、其余按并发扩容；`/64` 去重和 24 小时额度冷却仍然生效。
 
 要换回代理：`warp.enabled=false`，`proxies=["http://127.0.0.1:10808"]`。要换回纯直连：`warp.enabled=false`，`proxies=["direct"]`，但要接受 429。
