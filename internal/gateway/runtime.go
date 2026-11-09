@@ -243,6 +243,12 @@ func (m *RuntimeController) build(cfg config.Config, warpDeadline time.Duration)
 		discardWARP()
 		return nil, err
 	}
+	// Install the registration-time quota precheck after New: the check rides
+	// the gateway's free-tier request shape, and the pool outlives runtimes, so
+	// a shared pool needs it re-installed on every build.
+	if warpPool != nil {
+		warpPool.SetVerifier(gateway.verifyWARPEgress)
+	}
 	gateway.rotation = m.rotation
 	availabilityPath := ""
 	if m.configPath != "" {

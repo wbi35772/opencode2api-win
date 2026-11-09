@@ -222,11 +222,11 @@ func warpFailReason(err error) string {
 // that releases the exit when closed. The egress label is returned for
 // telemetry ("warp:<public address>").
 //
-// defer429 leaves a 429 unreported to the pool: the caller is validating
-// whether the rejection follows the session or the exit, and retiring the exit
-// before that answer is known would burn a healthy egress for the whole quota
-// cooldown. The caller must report the exit itself when the validation fails.
-func (g *Gateway) doWARPAttempt(ctx context.Context, req *http.Request, baseURL, model string, firstEventTimeout time.Duration, defer429 bool, affinity string) (*http.Response, string, error) {
+// loud429 logs a 429 body at INFO for the anonymous lane. Every 429 is fed to
+// the pool, which retires the exit on the first one: the free tier scopes the
+// rejection to the public egress block, so repeating the same exit repeats it.
+// The other lanes keep the line behind -debug because they do not act on it.
+func (g *Gateway) doWARPAttempt(ctx context.Context, req *http.Request, baseURL, model string, firstEventTimeout time.Duration, loud429 bool, affinity string) (*http.Response, string, error) {
 	lease, err := g.warp.AcquireFor(ctx, affinity)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -260,38 +260,21 @@ func (g *Gateway) doWARPAttempt(ctx context.Context, req *http.Request, baseURL,
 			if len(snippet) > 240 {
 				snippet = snippet[:240]
 			}
-			// The body says whether the 429 is a session quota or an exit rate
-			// limit; that distinction is the whole reason the caller defers the
-			// penalty, so the anonymous lane logs it normally. Other lanes keep
-			// it behind -debug: they do not act on it.
-			if defer429 {
-				g.logger.Info("free tier returned 429", "component", "upstream", "event", "free_tier_429_body", "status", resp.StatusCode, "snippet", snippet, "deferred", defer429)
+			// The body identifies a spent /64 quota and lets the next
+			// incident be diagnosed from the console without -debug. The
+			// anonymous lane acts on it; the other lanes do not.
+			if loud429 {
+				g.logger.Info("free tier returned 429", "component", "upstream", "event", "free_tier_429_body", "status", resp.StatusCode, "snippet", snippet, "reported", true)
 			} else {
-				g.logger.Debug("free tier returned 429", "component", "upstream", "event", "free_tier_429_body", "status", resp.StatusCode, "snippet", snippet, "deferred", defer429)
+				g.logger.Debug("free tier returned 429", "component", "upstream", "event", "free_tier_429_body", "status", resp.StatusCode, "snippet", snippet, "reported", true)
 			}
 		}
-		if !(defer429 && resp.StatusCode == http.StatusTooManyRequests) {
-			g.warp.Report(lease, resp.StatusCode, body, parseRetryAfter(resp.Header.Get("Retry-After")))
-		}
+		g.warp.Report(lease, resp.StatusCode, body, parseRetryAfter(resp.Header.Get("Retry-After")))
 	}
 	body := &warpBody{ReadCloser: resp.Body, lease: owned, diagnostic: diagnostic}
 	body.start()
 	resp.Body = body
 	return resp, label, nil
-}
-
-// penalizeHeldEgress retires the exit whose first 429 was deferred for session
-// validation, once the rotated session is rejected as well. The egress label is
-// the one doWARPAttempt returned ("warp:<public address>").
-func (g *Gateway) penalizeHeldEgress(label string, resp *http.Response) {
-	if g.warp == nil || label == "" || resp == nil {
-		return
-	}
-	key := strings.TrimPrefix(label, "warp:")
-	body := peekResponseBody(resp)
-	if g.warp.PenalizeEgress(key, resp.StatusCode, body, parseRetryAfter(resp.Header.Get("Retry-After"))) {
-		g.logger.Warn("held WARP exit failed session validation; retiring it", "component", "upstream", "event", "held_egress_retired", "proxy", label, "status", resp.StatusCode)
-	}
 }
 
 // setWarpEgress records the exit that actually carries the attempt so request
@@ -333,12 +316,12 @@ func (g *Gateway) doWarpAnonymousUpstream(ctx context.Context, route models.Rout
 	for index, baseURL := range upstreams {
 		prepared[index], renames[index] = prepareAnonymousBody(rawBody, protocol, models.IsV1Upstream(baseURL))
 	}
-	// A 429 on the free tier can belong to the exit or to the session. The
-	// first 429 of a request is validated against the session: the exit is
-	// not reported to the pool, the session id is rotated, and the request is
-	// retried. Only a second 429 retires the exit. Rotating exits first, as
-	// this lane used to, spends the whole warm pool on a spent conversation
-	// without ever fixing the request.
+	// A free-tier 429 is scoped to the exit's public /64: doWARPAttempt reports
+	// it and the pool retires that exit on the first one. On top of that the
+	// lane drops the conversation's pin and rotates the session id, so the
+	// retry differs in both the exit and the identity. The old deferral kept
+	// the exit and replayed it on the conversation's affinity, which repeated
+	// the same 429 on the same /64 before moving on.
 	limit := g.cfg.Retry.MaxAttempts
 	if limit < 1 {
 		limit = 1
@@ -354,8 +337,6 @@ func (g *Gateway) doWarpAnonymousUpstream(ctx context.Context, route models.Rout
 	// replacement instead of replaying a spent session.
 	baseIDs := ids
 	currentIDs := g.sessions.ResolveIDs(ids)
-	validateSession := true
-	heldEgress := ""
 	for attempts < limit {
 		if ctx.Err() != nil {
 			if lastErr == nil {
@@ -384,7 +365,7 @@ func (g *Gateway) doWarpAnonymousUpstream(ctx context.Context, route models.Rout
 			}
 			setRequestCredential(ctx, config.TierZen, "anonymous", "anonymous", true, nil)
 			started := time.Now()
-			resp, egress, err := g.doWARPAttempt(ctx, req, baseURL, route.ID, firstEventTimeout, validateSession, baseIDs.Session)
+			resp, egress, err := g.doWARPAttempt(ctx, req, baseURL, route.ID, firstEventTimeout, true, baseIDs.Session)
 			duration := time.Since(started)
 			if ctx.Err() != nil {
 				lastResponse, lastErr = resp, err
@@ -420,22 +401,15 @@ func (g *Gateway) doWarpAnonymousUpstream(ctx context.Context, route models.Rout
 				break
 			}
 			if status == http.StatusTooManyRequests {
-				// Hold the first 429 against the session, not the exit. The
-				// retry doubles as the validation: a 2xx on the rotated session
-				// proves the exit was healthy and the conversation was spent.
-				// A second 429 proves the opposite, so the held exit is retired
-				// now even though its report was deferred.
-				if heldEgress != "" && !validateSession {
-					g.penalizeHeldEgress(heldEgress, resp)
-					heldEgress = ""
-				}
+				// doWARPAttempt already reported the 429, so the pool has
+				// retired this exit and cooled its /64. Drop the conversation's
+				// pin anyway: the retry must walk the remaining ring, not
+				// repeat the spent exit through affinity. Rotating the session
+				// covers a rejection that followed the conversation as well.
+				g.warp.Unbind(baseIDs.Session)
 				rotated := g.sessions.RotateIDs(baseIDs)
-				g.logger.Info("free tier 429; rotating the session identity", "component", "upstream", "event", "session_identity_rotated", "request_id", ids.Request, "attempt", attempts, "tier", config.TierZen, "upstream", config.RedactURL(baseURL), "proxy", egress, "from_session", currentIDs.Session, "to_session", rotated.Session, "generation", g.sessions.Generation(baseIDs.Session), "exit_held", validateSession)
-				if validateSession {
-					heldEgress = egress
-				}
+				g.logger.Info("free tier 429; rotating the session identity", "component", "upstream", "event", "session_identity_rotated", "request_id", ids.Request, "attempt", attempts, "tier", config.TierZen, "upstream", config.RedactURL(baseURL), "proxy", egress, "from_session", currentIDs.Session, "to_session", rotated.Session, "generation", g.sessions.Generation(baseIDs.Session), "exit_retired", true)
 				currentIDs = rotated
-				validateSession = false
 				break
 			}
 			g.logger.Debug("anonymous WARP upstream returned an error response; trying the next upstream or exit", "component", "upstream", "event", "anonymous_attempt_response_failed", "request_id", ids.Request, "attempt", attempts, "tier", config.TierZen, "upstream", config.RedactURL(baseURL), "key_id", "anonymous", "channel", "anonymous", "anonymous", true, "proxy", egress, "status", status, "duration_ms", duration.Milliseconds())

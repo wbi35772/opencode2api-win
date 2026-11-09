@@ -64,6 +64,19 @@ const (
 	refillBackoffMax       = 5 * time.Minute
 )
 
+// firstDuplicateRetryDelay spaces out first-exit attempts when Cloudflare keeps
+// handing back /64 blocks that are already active or cooling. The spent-block
+// set can dwarf the fresh supply, so a fixed handful of registrations is not
+// enough to tell "no fresh egress" from "unlucky draw"; the first exit keeps
+// trying until the caller's deadline instead of failing startup.
+const firstDuplicateRetryDelay = 2 * time.Second
+
+// verifyAttempts is how many registrations one replacement may try when the
+// free-tier precheck is active. A spent block no longer costs a live request's
+// first attempt, but it does cost a fresh registration, and most new /64s are
+// spent; the plain budget would give up before finding a usable block.
+const verifyAttempts = 8
+
 // errDuplicateEgress reports a registration whose public egress block is
 // already active or cooling down.
 var errDuplicateEgress = errors.New("WARP egress is already active or cooling down")
@@ -85,6 +98,23 @@ var ErrNoExit = errors.New("WARP pool has no ready egress")
 // emptyPoolWait bounds how long Acquire blocks on an empty pool. A registration
 // normally finishes well inside this; anything longer means WARP is down.
 const emptyPoolWait = 25 * time.Second
+
+// ErrEgressSpent reports that a freshly registered exit's public block has
+// already exhausted the upstream's free-tier quota. Most new /64s are someone
+// else's spent block, so the pool quarantines the block on registration instead
+// of spending a live request's first attempt on it.
+var ErrEgressSpent = errors.New("WARP egress free-tier quota is spent")
+
+// DialFunc opens one TCP connection through a candidate WARP exit. It mirrors
+// exit.dialContext so a verifier uses exactly the tunnel the pool is judging.
+type DialFunc func(ctx context.Context, network, address string) (net.Conn, error)
+
+// Verifier checks a newly registered exit against the upstream's free-tier
+// quota before the pool admits it. A nil error admits the exit and records it
+// as proven; ErrEgressSpent quarantines the public block for the quota
+// cooldown; any other error admits the exit unproven, because a broken probe
+// path must not keep replacements out of the pool.
+type Verifier func(ctx context.Context, dial DialFunc) error
 
 // maxAffinity bounds the conversation→exit map. A gateway that runs for weeks
 // sees far more conversations than exits, so the map is capped and one entry is
@@ -137,6 +167,10 @@ type Pool struct {
 	stack     Stack
 	statePath string
 	newExit   func(context.Context) (*exit, error)
+	// verify, when set, screens every new registration and the exits admitted
+	// before the gateway existed. It is installed after construction because
+	// the check runs through the gateway's free-tier request shape.
+	verify Verifier
 	// relay is the shared SOCKS5 UDP circuit breaker; nil when the outer UDP
 	// goes direct.
 	relay *relayGuard
@@ -353,19 +387,32 @@ func newPool(ctx context.Context, log logger, size int, statePath string, create
 	// The first registration gates readiness. Cloudflare can answer it with a
 	// rate limit even when this process has just started (the limit follows the
 	// source address), so wait out that window inside the caller's deadline
-	// instead of failing startup over a pause that is about to end. Any other
-	// failure still fails closed.
+	// instead of failing startup over a pause that is about to end. A duplicate
+	// /64 is the other transient answer: with a large spent-block set the next
+	// registration often lands on an already cooling block, and a fixed attempt
+	// budget would fail startup even though a fresh block is still reachable.
+	// Keep retrying both until the caller's deadline; any other failure still
+	// fails closed.
 	first, err := p.createExit(ctx)
 	for err != nil {
 		pause := registrationPause(err)
-		if pause <= 0 {
+		var delay time.Duration
+		switch {
+		case pause > 0:
+			delay = pause
+			if log != nil {
+				log.Infof("OpenCode WARP first registration paused for %s", delay.Round(time.Second))
+			}
+		case errors.Is(err, errDuplicateEgress), errors.Is(err, ErrEgressSpent):
+			delay = firstDuplicateRetryDelay
+			if log != nil {
+				log.Debugf("OpenCode WARP first egress is a spent block; retrying in %s", delay)
+			}
+		default:
 			cancel()
 			return nil, err
 		}
-		if log != nil {
-			log.Infof("OpenCode WARP first registration paused for %s", pause.Round(time.Second))
-		}
-		timer := time.NewTimer(pause)
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -419,11 +466,12 @@ func (p *Pool) Acquire(ctx context.Context) (*Lease, error) {
 }
 
 // AcquireFor leases an exit, preferring the one already serving affinity (the
-// conversation key). The free tier ledgers its quota against the pair (session,
-// egress), so a conversation that hops exits looks spent to every fresh one and
-// answers 429 on the first attempt of every turn. Pinning the conversation to a
-// single exit removes that pattern; an empty affinity keeps the old
-// round-robin behavior for keyed and probe traffic.
+// conversation key). A conversation that hops exits can look spent to a fresh
+// block even when its previous exit was healthy, so the pin keeps a working
+// pair together. With an empty affinity (probes, keyed traffic) the lease is
+// proven-first: an exit that already answered a 2xx before an untested one,
+// because a freshly registered public /64 is often already spent and answers
+// 429 on its first request.
 func (p *Pool) AcquireFor(ctx context.Context, affinity string) (*Lease, error) {
 	for {
 		p.mu.Lock()
@@ -444,20 +492,15 @@ func (p *Pool) AcquireFor(ctx context.Context, affinity string) (*Lease, error) 
 				delete(p.affinity, affinity)
 			}
 		}
-		for attempts := 0; attempts < len(p.active); attempts++ {
-			index := p.next % len(p.active)
-			p.next = (p.next + 1) % len(p.active)
-			active := p.active[index]
-			if active.addRef() {
-				p.inflight++
-				if affinity != "" {
-					p.bindAffinityLocked(affinity, active)
-				}
-				p.mu.Unlock()
-				// Demand just rose: grow the ring toward it in the background.
-				p.startRefill()
-				return &Lease{pool: p, exit: active}, nil
-			}
+		lease := p.leaseLocked(affinity, true)
+		if lease == nil {
+			lease = p.leaseLocked(affinity, false)
+		}
+		if lease != nil {
+			p.mu.Unlock()
+			// Demand just rose: grow the ring toward it in the background.
+			p.startRefill()
+			return lease, nil
 		}
 		p.waiting++
 		changed := p.changed
@@ -493,6 +536,117 @@ func (p *Pool) AcquireFor(ctx context.Context, affinity string) (*Lease, error) 
 			return nil, err
 		}
 	}
+}
+
+// leaseLocked walks the ring from p.next and leases the first exit that can
+// take another request. provenOnly restricts the walk to exits with a recorded
+// 2xx so an untested block is only tried when no proven one is free. The caller
+// holds p.mu.
+func (p *Pool) leaseLocked(affinity string, provenOnly bool) *Lease {
+	for attempts := 0; attempts < len(p.active); attempts++ {
+		index := p.next % len(p.active)
+		p.next = (p.next + 1) % len(p.active)
+		active := p.active[index]
+		if provenOnly && !active.served() {
+			continue
+		}
+		if active.addRef() {
+			p.inflight++
+			if affinity != "" {
+				p.bindAffinityLocked(affinity, active)
+			}
+			return &Lease{pool: p, exit: active}
+		}
+	}
+	return nil
+}
+
+// Unbind drops the exit pinned to affinity. A conversation that was answered
+// 429 must not be handed the same exit again: the free tier scopes the
+// rejection to the public block, so the retry walks the ring instead. The next
+// AcquireFor invalidates a retired pin on its own; dropping it here keeps the
+// retry independent of that lookup and of a concurrent replacement.
+func (p *Pool) Unbind(affinity string) {
+	if affinity == "" {
+		return
+	}
+	p.mu.Lock()
+	delete(p.affinity, affinity)
+	p.mu.Unlock()
+}
+
+// SetVerifier installs the registration-time free-tier quota check. It is
+// called after construction because the check itself needs the gateway that
+// owns the pool. The exits admitted before this call (the synchronous first
+// registration, and any preload that won the race) are screened in the
+// background so the cold-start request does not sample a spent block either.
+func (p *Pool) SetVerifier(verify Verifier) {
+	p.mu.Lock()
+	p.verify = verify
+	admitted := append([]*exit(nil), p.active...)
+	p.mu.Unlock()
+	if verify == nil || len(admitted) == 0 {
+		return
+	}
+	p.wait.Add(1)
+	go func() {
+		defer p.wait.Done()
+		for _, candidate := range admitted {
+			// A busy exit is already serving traffic: its outcome, not a
+			// second probe, decides whether the block is spent.
+			if candidate.served() || !candidate.idle() {
+				continue
+			}
+			if err := p.checkQuota(p.ctx, candidate); errors.Is(err, ErrEgressSpent) {
+				p.penalize(candidate, "free-tier precheck", 0, penaltyQuota)
+			}
+		}
+	}()
+}
+
+// checkQuota runs the configured verifier against e. It returns nil when the
+// exit is admitted (proven on a 2xx, merely unproven on any other probe
+// failure) and ErrEgressSpent when the public block is already spent.
+func (p *Pool) checkQuota(ctx context.Context, e *exit) error {
+	p.mu.Lock()
+	verify := p.verify
+	p.mu.Unlock()
+	if verify == nil {
+		return nil
+	}
+	err := verify(ctx, e.dialContext)
+	switch {
+	case err == nil:
+		e.markSuccess(time.Now())
+		return nil
+	case errors.Is(err, ErrEgressSpent):
+		return ErrEgressSpent
+	default:
+		if p.logger != nil {
+			p.logger.Debugf("OpenCode WARP precheck for %s was inconclusive: %v", e.egress, err)
+		}
+		return nil
+	}
+}
+
+// quarantine writes a spent public block off for the fixed quota cooldown and
+// closes the rejected candidate. The exit never joins the ring, so no live
+// request pays an attempt on it.
+func (p *Pool) quarantine(e *exit, until time.Time) {
+	key := e.egressKey()
+	p.mu.Lock()
+	if key != "" {
+		if parked, ok := p.cooling[key]; !ok || until.After(parked) {
+			p.cooling[key] = until
+		}
+		delete(p.reserved, key)
+	}
+	p.mu.Unlock()
+	p.saveCooling()
+	if p.logger != nil {
+		p.logger.Warnf("OpenCode WARP egress %s is already spent; cooling %s before use", e.egress, time.Until(until).Round(time.Second))
+	}
+	e.close()
 }
 
 // Report feeds one upstream response back into the pool. retryAfter, when the
@@ -585,10 +739,15 @@ func rateLimitCooldownFor(retryAfter time.Duration) time.Duration {
 	return cooldown
 }
 
-// noteSuccess clears a block's strike history after a real 2xx. A stale strike
-// must not escalate a later 429 into a 24-hour quarantine.
+// noteSuccess stamps that the exit answered a real request with a 2xx. There is
+// no strike escalation to clear (the blacklist is a fixed 24h), but the
+// timestamp feeds the prefer-proven rule in AcquireFor: a block that has
+// already served traffic is a far better bet than a freshly registered /64
+// that most likely belongs to someone else's spent quota.
 func (p *Pool) noteSuccess(e *exit) {
-	// Fixed 24h blacklist: no strike escalation to clear.
+	if e != nil {
+		e.markSuccess(time.Now())
+	}
 }
 
 // Fail drops an exit that cannot carry traffic even though the upstream never
@@ -1052,7 +1211,19 @@ func (p *Pool) createExit(ctx context.Context) (*exit, error) {
 	p.createMu.Lock()
 	defer p.createMu.Unlock()
 	var lastErr error
-	for attempt := 0; attempt < 4; attempt++ {
+	attempts := 4
+	p.mu.Lock()
+	if p.verify != nil {
+		attempts = verifyAttempts
+	}
+	p.mu.Unlock()
+	for attempt := 0; attempt < attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			if lastErr == nil {
+				lastErr = err
+			}
+			break
+		}
 		p.mu.Lock()
 		closed := p.closed
 		p.mu.Unlock()
@@ -1077,6 +1248,13 @@ func (p *Pool) createExit(ctx context.Context) (*exit, error) {
 		}
 		p.mu.Unlock()
 		if usable {
+			if err := p.checkQuota(ctx, candidate); err != nil {
+				// The block answered the free-tier quota limit before any
+				// client saw it: park it and register a fresh /64 instead.
+				p.quarantine(candidate, time.Now().Add(quotaCooldownFor(0, 0)))
+				lastErr = fmt.Errorf("%w: %s", err, key)
+				continue
+			}
 			if p.logger != nil {
 				p.logger.Infof("OpenCode WARP/%s egress %s ready at %s", candidate.stack, candidate.id, candidate.egress)
 			}

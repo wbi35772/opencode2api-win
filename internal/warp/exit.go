@@ -95,8 +95,9 @@ type exit struct {
 	refs      int
 	retired   bool
 	closed    bool
-	penalty    penaltyKind
-	inFlight   int
+	penalty   penaltyKind
+	inFlight  int
+	lastOK    time.Time
 	closeOnce sync.Once
 }
 
@@ -626,6 +627,25 @@ func (e *exit) addRef() bool {
 	e.refs++
 	e.inFlight++
 	return true
+}
+
+// markSuccess records that the upstream answered this exit with a 2xx. The pool
+// prefers blocks that have already served traffic: a freshly registered public
+// /64 is often already spent by other free-tier users, so handing one out blind
+// costs an attempt and a 429 before the block is retired.
+func (e *exit) markSuccess(now time.Time) {
+	e.mu.Lock()
+	if now.After(e.lastOK) {
+		e.lastOK = now
+	}
+	e.mu.Unlock()
+}
+
+// served reports whether this exit has ever answered a request with a 2xx.
+func (e *exit) served() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return !e.lastOK.IsZero()
 }
 
 func (e *exit) release() {

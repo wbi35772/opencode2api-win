@@ -11,10 +11,12 @@ import (
 	"time"
 
 	"opencode2api/internal/config"
+	"opencode2api/internal/httpx"
 	"opencode2api/internal/identity"
 	"opencode2api/internal/jsonutil"
 	"opencode2api/internal/models"
 	wire "opencode2api/internal/protocol"
+	"opencode2api/internal/warp"
 )
 
 // probeResult is the outcome of a free-model probe: whether it succeeded and
@@ -214,6 +216,13 @@ func (g *Gateway) probeFreeModel(ctx context.Context, model string) probeResult 
 	return result
 }
 
+// probeAffinity pins availability probes to one exit. A probe only needs a
+// working egress, not a fresh one; walking the ring with a fresh identity would
+// sample (and retire) a block per model per hour that live traffic could have
+// used. The pool prefers proven exits anyway, so the pin also keeps probes off
+// freshly registered blocks.
+const probeAffinity = "availability-probe"
+
 // probeAttempt sends one probe request through client with a 60-second budget
 // and classifies the result. Unlike live traffic it bypasses
 // doInferenceAttempt and records nothing against keys or proxies. When overWARP
@@ -240,7 +249,7 @@ func (g *Gateway) probeAttempt(parent context.Context, client *http.Client, base
 	if overWARP {
 		// The probe context already bounds the attempt; no first-event or
 		// attempt deadline applies on top of it.
-		resp, _, err = g.doWARPAttempt(ctx, req, baseURL, model, 0, false, "")
+		resp, _, err = g.doWARPAttempt(ctx, req, baseURL, model, 0, false, probeAffinity)
 	} else {
 		resp, err = client.Do(req)
 	}
@@ -350,6 +359,101 @@ func isEffortRejection(status int, body string) bool {
 		return false
 	}
 	for _, marker := range []string{"invalid", "unsupported", "not support", "not allowed", "must be", "allowed values"} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// verifyWARPEgress screens a freshly registered exit against the free tier's
+// quota before the pool admits it. A new public /64 is usually somebody else's
+// already-spent block, so the precheck pays one minimal completion here instead
+// of spending a live request's first attempt on a 429. A nil result admits the
+// exit and records it as proven; warp.ErrEgressSpent quarantines the block; any
+// other failure admits it unproven, because a broken probe path must not keep
+// replacements out of the pool.
+func (g *Gateway) verifyWARPEgress(ctx context.Context, dial warp.DialFunc) error {
+	model, protocol, baseURL := g.precheckTarget()
+	if model == "" {
+		return nil
+	}
+	body, err := probePayload(model, protocol, "", models.IsV1Upstream(baseURL))
+	if err != nil {
+		return err
+	}
+	ids := probeRequestIDs()
+	ids.Request = identity.RandomID("req", 16)
+	checkCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	req, err := upstreamRequest(checkCtx, baseURL, protocol, body, ids, anonymousZenKey)
+	if err != nil {
+		return err
+	}
+	bun, err := httpx.NewBunTransport(httpx.BunOptions{
+		DialContext:           dial,
+		ConnectTimeout:        10 * time.Second,
+		ResponseHeaderTimeout: 20 * time.Second,
+		IdleConnTimeout:       30 * time.Second,
+		MaxIdleConnsPerHost:   1,
+	})
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Transport: bun}
+	defer client.CloseIdleConnections()
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 == 2 {
+		// Drain a slice of the stream so the tiny completion is accounted for
+		// and the exit's tunnel sees a clean close.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		return nil
+	}
+	snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+	if isFreeUsageLimit(resp.StatusCode, snippet) || isNetworkAbuseBlock(resp.StatusCode, snippet) {
+		return fmt.Errorf("%w: HTTP %d %s", warp.ErrEgressSpent, resp.StatusCode, strings.TrimSpace(string(snippet)))
+	}
+	return fmt.Errorf("precheck status %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
+}
+
+// precheckTarget picks the cheapest live free-tier lane for the registration
+// precheck: the first catalog model the free tier serves, its Zen protocol, and
+// the anonymous upstream. It returns an empty model when the catalog is not
+// ready yet; the pool then admits exits unproven and the first real request
+// still teaches it.
+func (g *Gateway) precheckTarget() (string, wire.Protocol, string) {
+	baseURL := g.anonymousUpstreams()[0]
+	for _, model := range g.catalog.List() {
+		if !g.catalog.IsFreeModel(model) || !g.catalog.Supported(model) {
+			continue
+		}
+		d := g.catalog.Diagnostic(model, wire.Chat, g.zenNodes.Len() > 0, false, g.cfg.Anonymous)
+		if !d.AvailableZen {
+			continue
+		}
+		protocol := d.NativeProtocols[config.TierZen]
+		if protocol == "" {
+			protocol = wire.Chat
+		}
+		return model, protocol, baseURL
+	}
+	return "", wire.Chat, ""
+}
+
+// isFreeUsageLimit reports whether a response says the free-tier quota of the
+// exit's public block is exhausted. A bare 429 without that marker is a
+// transient rate limit and says nothing about the block, so it must stay
+// unproven instead of quarantined.
+func isFreeUsageLimit(status int, body []byte) bool {
+	if status != http.StatusTooManyRequests && status != http.StatusForbidden {
+		return false
+	}
+	text := strings.ToLower(string(body))
+	for _, marker := range []string{"freeusagelimiterror", "free usage limit", "usage limit reached"} {
 		if strings.Contains(text, marker) {
 			return true
 		}
