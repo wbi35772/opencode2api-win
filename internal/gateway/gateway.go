@@ -271,6 +271,10 @@ func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
 			wire.WriteError(w, external, http.StatusBadRequest, "model is required", "invalid_request_error", "model")
 			return
 		}
+		if err := wire.ValidateRequestParameters(external, payload); err != nil {
+			wire.WriteError(w, external, http.StatusBadRequest, err.Error(), "invalid_request_error", "")
+			return
+		}
 		if id := g.rotation.GroupID(model); id != "" {
 			g.handleRotation(w, r, external, payload, id, model)
 			return
