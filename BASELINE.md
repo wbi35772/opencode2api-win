@@ -192,7 +192,7 @@ GOOS=windows go build          PASS
 | 免费额度按 project × 出口 | 连续请求会快速消耗出口；等池子回血或重置 `warp-state.json` |
 | `free_only=true` | `sota` 组返回 `503 rotation_unavailable`；付费模型返回 `400 not free` |
 | Go OAuth 未完整实现 | `go_subscription` 只是配置占位 |
-| 发布提交 | `758cb59`，tag `v1.4.8-win.2`，已推 GitHub |
+| 发布提交 | 代码 `758cb59`；tag `v1.4.8-win.2`（含本文档），已推 GitHub |
 | 未移植 `#167` | Playground 固定 relay 的诊断参数；只影响诊断页，不影响请求路径 |
 | 未移植 `0d05fe93` | v1.4.8 后的未发版提交，含匿名默认关闭与批量代理管理 |
 
