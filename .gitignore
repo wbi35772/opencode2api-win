@@ -10,3 +10,5 @@ usque/
 /tools/
 /config-backups/
 *.exe.bak*
+test/
+/release/

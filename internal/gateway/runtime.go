@@ -447,6 +447,17 @@ func (m *RuntimeController) Redact(value string) string {
 
 // Config returns a copy of the configuration the current runtime was built
 // from, or the zero Config when no runtime exists.
+// WarpPool returns the WARP pool of the running runtime, or nil when WARP is
+// disabled. A reload that swaps runtimes hands the next call the new pool, so
+// the admin blacklist API never edits a retired one.
+func (m *RuntimeController) WarpPool() *warp.Pool {
+	runtime := m.current.Load()
+	if runtime == nil {
+		return nil
+	}
+	return runtime.warpPool
+}
+
 func (m *RuntimeController) Config() config.Config {
 	runtime := m.current.Load()
 	if runtime == nil {

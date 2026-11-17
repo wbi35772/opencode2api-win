@@ -69,3 +69,65 @@ func TestSessionGuardEmpty(t *testing.T) {
 		t.Fatalf("RotateIDs without a child = %+v", got)
 	}
 }
+
+func TestSessionGuardProjectRotation(t *testing.T) {
+	g := newSessionGuard()
+	base := "0f2c1b9a4d7eConversationAlpha"
+	if got := g.ResolveProject(base); got != base {
+		t.Fatalf("generation zero must keep the client project, got %q", got)
+	}
+	if gen := g.ProjectGeneration(base); gen != 0 {
+		t.Fatalf("fresh project generation = %d, want 0", gen)
+	}
+
+	first := g.RotateProject(base)
+	if first == base || len(first) != 40 {
+		t.Fatalf("rotated project %q must be a 40-hex replacement, not the spent bucket", first)
+	}
+	if got := g.ResolveProject(base); got != first {
+		t.Fatalf("ResolveProject after rotation = %q, want %q", got, first)
+	}
+	if gen := g.ProjectGeneration(base); gen != 1 {
+		t.Fatalf("project generation after one rotation = %d, want 1", gen)
+	}
+	second := g.RotateProject(base)
+	if second == first {
+		t.Fatalf("second rotation reused the first replacement: %q", second)
+	}
+}
+
+func TestSessionGuardResolveIDsCarriesProject(t *testing.T) {
+	g := newSessionGuard()
+	ids := identity.RequestIDs{Session: "parent-conversation", Project: "project" + "\x00" + "must-stay-verbatim"}
+	resolved := g.ResolveIDs(ids)
+	if resolved.Project != ids.Project {
+		t.Fatalf("generation zero must pass the client project through, got %q", resolved.Project)
+	}
+	g.RotateProject(ids.Project)
+	resolved = g.ResolveIDs(ids)
+	if resolved.Project == ids.Project {
+		t.Fatalf("after a project rotation ResolveIDs must return the replacement, got the spent bucket %q", resolved.Project)
+	}
+	if len(resolved.Project) != 40 {
+		t.Fatalf("rotated project %q must be 40-hex", resolved.Project)
+	}
+}
+
+func TestIdentityCanonicalProjectID(t *testing.T) {
+	a := identity.CanonicalProjectID("prj\x00seed-a")
+	b := identity.CanonicalProjectID("prj\x00seed-b")
+	if a == b {
+		t.Fatalf("distinct seeds must not derive the same project id")
+	}
+	if len(a) != 40 {
+		t.Fatalf("canonical project id %q must be 40-hex like the official CLI, got length %d", a, len(a))
+	}
+	for _, r := range a {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			t.Fatalf("canonical project id %q contains non-lowercase-hex rune %q", a, r)
+		}
+	}
+	if got := identity.CanonicalProjectID("prj\x00seed-a"); got != a {
+		t.Fatalf("canonical project id must be stable within a process: %q then %q", a, got)
+	}
+}

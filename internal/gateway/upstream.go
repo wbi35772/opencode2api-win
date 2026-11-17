@@ -218,8 +218,13 @@ func stripStaleReasoningInputs(route models.Route, bodies map[config.Tier][]byte
 // 2xx. Without a success it returns the last HTTP response, whose body is still
 // open, in preference to the last error. Once ctx is done it no longer enters
 // the key tiers.
-func (g *Gateway) doUpstreamTiers(ctx context.Context, route models.Route, bodies map[config.Tier][]byte, ids identity.RequestIDs, attemptOffset int) (*http.Response, models.Route, int, error) {
+func (g *Gateway) doUpstreamTiers(ctx context.Context, route models.Route, bodies map[config.Tier][]byte, ids identity.RequestIDs, attemptOffset int) (response *http.Response, resultRoute models.Route, resultAttempts int, resultErr error) {
 	var lastResponse *http.Response
+	defer func() {
+		if lastResponse != nil && lastResponse != response {
+			httpx.DrainAndClose(lastResponse.Body)
+		}
+	}()
 	var lastErr error
 	effectiveRoute := route
 	attempts := attemptOffset
@@ -232,10 +237,13 @@ func (g *Gateway) doUpstreamTiers(ctx context.Context, route models.Route, bodie
 	if route.Anonymous {
 		resp, err, used := g.doAnonymousUpstream(ctx, route, bodies, ids, attempts)
 		attempts += used
+		lastResponse, lastErr = resp, err
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return nil, effectiveRoute, attempts, ctx.Err()
+		}
 		if err == nil && resp != nil && resp.StatusCode/100 == 2 {
 			return resp, route, attempts, nil
 		}
-		lastResponse, lastErr = resp, err
 		if errors.Is(err, errDeterministicClientRejection) {
 			// The request itself was rejected. Another lane or key gets the same
 			// answer, and retrying only buries this error under the next one, so
@@ -260,6 +268,9 @@ func (g *Gateway) doUpstreamTiers(ctx context.Context, route models.Route, bodie
 		// The anonymous phase already consumed the request budget. Entering the
 		// authenticated tiers here would only fire instant attempts against a
 		// dead context, cooling keys that were never really tried.
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return nil, effectiveRoute, attempts, ctx.Err()
+		}
 		if lastResponse != nil {
 			return lastResponse, effectiveRoute, attempts, nil
 		}
@@ -282,13 +293,17 @@ func (g *Gateway) doUpstreamTiers(ctx context.Context, route models.Route, bodie
 		keyRoute.Tier = tier
 		keyRoute.Anonymous = false
 		keyRoute.Protocol = route.ProtocolFor(tier)
-		effectiveRoute = keyRoute
+		bufferRetryResponse(lastResponse)
 		resp, err, used := g.doKeyUpstream(ctx, keyRoute, bodies, ids, attempts)
 		attempts += used
+		lastResponse = replaceRetryResponse(lastResponse, resp)
+		if resp != nil {
+			effectiveRoute = keyRoute
+		}
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return nil, effectiveRoute, attempts, ctx.Err()
+		}
 		if err == nil && resp != nil && resp.StatusCode/100 == 2 {
-			if lastResponse != nil {
-				httpx.DrainAndClose(lastResponse.Body)
-			}
 			return resp, keyRoute, attempts, nil
 		}
 		if resp != nil {
@@ -296,27 +311,20 @@ func (g *Gateway) doUpstreamTiers(ctx context.Context, route models.Route, bodie
 				// Same request-level rejection as on the anonymous lane: no
 				// other tier can fix it, so return it as is.
 				g.logger.Warn("upstream rejected the request; not trying other tiers", "component", "upstream", "event", "deterministic_rejection", "request_id", ids.Request, "attempts", attempts, "tier", keyRoute.Tier, "status", resp.StatusCode)
-				if lastResponse != nil {
-					httpx.DrainAndClose(lastResponse.Body)
-				}
 				return resp, keyRoute, attempts, nil
 			}
-			if lastResponse != nil {
-				httpx.DrainAndClose(lastResponse.Body)
-			}
-			lastResponse = resp
 		}
 		if err != nil {
 			lastErr = err
 		}
 	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return nil, effectiveRoute, attempts, ctx.Err()
+	}
 	if blocked {
 		// The request never left the free tier's IP block: keep the block as
 		// the client-facing cause even if a Go fallback also failed, and close
 		// the last free-tier response whose body the handler will not forward.
-		if lastResponse != nil {
-			httpx.DrainAndClose(lastResponse.Body)
-		}
 		return nil, effectiveRoute, attempts, errFreeTierIPBlocked
 	}
 	if lastResponse != nil {
@@ -397,7 +405,7 @@ func (g *Gateway) warpProxyFallbackAllowed(ctx context.Context, resp *http.Respo
 // exhausting the proxy cursor returns control to the preferred authenticated
 // tiers. It returns the last response (body still open), else the last error,
 // plus the number of attempts made.
-func (g *Gateway) doAnonymousProxyUpstream(ctx context.Context, route models.Route, bodies map[config.Tier][]byte, ids identity.RequestIDs, attemptOffset int) (*http.Response, error, int) {
+func (g *Gateway) doAnonymousProxyUpstream(ctx context.Context, route models.Route, bodies map[config.Tier][]byte, ids identity.RequestIDs, attemptOffset int) (response *http.Response, resultErr error, resultAttempts int) {
 	// The breaker holds the lane shut for an hour-scale window after repeated
 	// failures: poking a flagged upstream again would only extend the block.
 	if !g.anonymous.AllowAttempt() {
@@ -405,6 +413,11 @@ func (g *Gateway) doAnonymousProxyUpstream(ctx context.Context, route models.Rou
 	}
 	defer g.anonymous.ReleaseProbe()
 	var lastResponse *http.Response
+	defer func() {
+		if lastResponse != nil && lastResponse != response {
+			httpx.DrainAndClose(lastResponse.Body)
+		}
+	}()
 	var lastErr error
 	// blocked records that some exit is under the free tier's IP block. The
 	// result then reports errFreeTierIPBlocked even when no exit was left to
@@ -425,6 +438,10 @@ func (g *Gateway) doAnonymousProxyUpstream(ctx context.Context, route models.Rou
 	if len(rawBody) == 0 {
 		return nil, errors.New("no prepared Zen request body"), 0
 	}
+	isTitle := isTitleGenerationBody(rawBody)
+	if isTitle {
+		limit = 1
+	}
 	// The anonymous free tier only serves agent-shaped streaming requests
 	// carrying the required tool definitions (anything else is rejected with 403
 	// FreeTierError). Normalize the wire body per upstream gate (v1 /zen vs v2
@@ -436,7 +453,7 @@ func (g *Gateway) doAnonymousProxyUpstream(ctx context.Context, route models.Rou
 	preparedBodies := make([][]byte, len(upstreams))
 	toolRenames := make([]*wire.ToolRenames, len(upstreams))
 	for i, baseURL := range upstreams {
-		preparedBodies[i], toolRenames[i] = prepareAnonymousBody(rawBody, protocol, models.IsV1Upstream(baseURL))
+		preparedBodies[i], toolRenames[i] = prepareAnonymousBody(rawBody, protocol, models.IsV1Upstream(baseURL), g.cfg.Upstream.PromptEnvironment)
 	}
 	for proxies < limit {
 		if ctx.Err() != nil {
@@ -473,10 +490,7 @@ func (g *Gateway) doAnonymousProxyUpstream(ctx context.Context, route models.Rou
 				meta.Attempts = attemptOffset + attempts
 				meta.Tier = string(config.TierZen)
 			}
-			if lastResponse != nil {
-				httpx.DrainAndClose(lastResponse.Body)
-				lastResponse = nil
-			}
+			bufferRetryResponse(lastResponse)
 			req, err := upstreamRequest(ctx, baseURL, protocol, preparedBodies[index], ids, anonymousZenKey)
 			if err != nil {
 				return nil, err, attempts
@@ -488,11 +502,12 @@ func (g *Gateway) doAnonymousProxyUpstream(ctx context.Context, route models.Rou
 			started := time.Now()
 			resp, err := doInferenceAttempt(g.inferenceClient(node.proxy, baseURL, route.ID), req, time.Duration(g.cfg.Performance.FirstEventTimeoutSeconds)*time.Second, g.attemptTimeout)
 			duration := time.Since(started)
+			lastResponse = replaceRetryResponse(lastResponse, resp)
 			if ctx.Err() != nil {
 				// The parent budget expired while this attempt was in flight. Its
 				// outcome says nothing about this proxy, so record nothing and stop
 				// scanning.
-				lastResponse, lastErr = resp, err
+				lastErr = err
 				if lastErr == nil && lastResponse == nil {
 					lastErr = ctx.Err()
 				}
@@ -505,7 +520,6 @@ func (g *Gateway) doAnonymousProxyUpstream(ctx context.Context, route models.Rou
 				g.logger.Debug("anonymous upstream accepted request", "component", "upstream", "event", "anonymous_attempt_succeeded", "request_id", ids.Request, "attempt", attempts, "tier", config.TierZen, "upstream", config.RedactURL(baseURL), "key_id", "anonymous", "channel", "anonymous", "anonymous", true, "proxy", config.RedactURL(node.proxy.name), "status", resp.StatusCode, "duration_ms", duration.Milliseconds())
 				return resp, nil, attempts
 			}
-			lastResponse = resp
 			lastErr = asProxyUnavailable(node.proxy, err)
 			if err != nil {
 				g.logger.Debug("anonymous transport attempt failed", "component", "upstream", "event", "anonymous_attempt_transport_failed", "request_id", ids.Request, "attempt", attempts, "tier", config.TierZen, "upstream", config.RedactURL(baseURL), "key_id", "anonymous", "channel", "anonymous", "anonymous", true, "proxy", config.RedactURL(node.proxy.name), "duration_ms", duration.Milliseconds(), "error", err)
@@ -556,12 +570,21 @@ func (g *Gateway) doAnonymousProxyUpstream(ctx context.Context, route models.Rou
 			break
 		}
 	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return nil, ctx.Err(), attempts
+	}
 	// Every configured exit is under the same IP block: another request
 	// cannot reach a working exit, so pause the lane instead of repeating the
 	// 403 walk until the exit cool-downs expire.
 	if blocked && g.anonymous.blockedExits(time.Now()) {
 		if pause, tripped := g.anonymous.ForceOpen(); tripped {
 			g.logger.Warn("anonymous lane circuit breaker opened", "component", "upstream", "event", "anonymous_breaker_open", "reason", "all_exits_blocked", "request_id", ids.Request, "paused_for", pause.String())
+		}
+	}
+	if isTitle {
+		if fallback := titleFallback(g.logger, route.ID, rawBody, lastResponse, lastErr); fallback != nil {
+			lastResponse = nil
+			return fallback, nil, attempts
 		}
 	}
 	if lastResponse != nil {
@@ -626,14 +649,14 @@ func (g *Gateway) inferenceClient(proxy *proxyTransport, baseURL, model string) 
 // tools are renamed and completed for the lane v1 selects; an unchanged body is
 // returned as is.
 //
-// Every named client tool becomes an opaque clint_<digest> (see
+// Every named client tool becomes an opaque wire name (see
 // protocol.ClientToolWireName: a client tool name that survives on the wire is
 // what the free tier refuses) and the full official set for the lane is
 // appended, so the request looks like an official CLI session on both the v1
 // (/zen) and v2 lanes. System One payloads are decision requests, not agent
 // traffic, so they are forwarded verbatim, as is a body that is not a JSON
 // object.
-func prepareAnonymousBody(body []byte, protocol wire.Protocol, v1 bool) ([]byte, *wire.ToolRenames) {
+func prepareAnonymousBody(body []byte, protocol wire.Protocol, v1 bool, environment *config.PromptEnvironmentConfig) ([]byte, *wire.ToolRenames) {
 	if protocol == wire.SystemOne {
 		return body, nil
 	}
@@ -641,6 +664,7 @@ func prepareAnonymousBody(body []byte, protocol wire.Protocol, v1 bool) ([]byte,
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return body, nil
 	}
+	isTitle := isTitleGenerationRequest(payload)
 	changed := false
 	if streaming, ok := payload["stream"].(bool); !ok || !streaming {
 		payload["stream"] = true
@@ -649,12 +673,20 @@ func prepareAnonymousBody(body []byte, protocol wire.Protocol, v1 bool) ([]byte,
 	if ensureAnonymousChatUsage(payload, protocol) {
 		changed = true
 	}
-	if injectOfficialPrompt(payload, protocol, v1) {
+	if injectOfficialPrompt(payload, protocol, v1, environment) {
 		changed = true
 	}
-	renames, toolsChanged := renameAndCompleteTools(payload, protocol, v1)
-	if toolsChanged {
-		changed = true
+	var renames *wire.ToolRenames
+	if !isTitle {
+		platform := ""
+		if environment != nil {
+			platform = environment.Platform
+		}
+		var toolsChanged bool
+		renames, toolsChanged = renameAndCompleteTools(payload, protocol, v1, platform)
+		if toolsChanged {
+			changed = true
+		}
 	}
 	if !v1 && protocol == wire.Chat && ensureV2CompletionLimit(payload) {
 		changed = true
@@ -837,7 +869,7 @@ func (g *Gateway) shapeKeyBody(body []byte, route models.Route, tier config.Tier
 	if tier == config.TierGo {
 		baseURL = g.cfg.Upstream.Go
 	}
-	shaped, renames := prepareAnonymousBody(body, route.ProtocolFor(tier), models.IsV1Upstream(baseURL))
+	shaped, renames := prepareAnonymousBody(body, route.ProtocolFor(tier), models.IsV1Upstream(baseURL), g.cfg.Upstream.PromptEnvironment)
 	return shaped, renames, !bytes.Equal(shaped, body)
 }
 
@@ -926,8 +958,13 @@ func (g *Gateway) doSelectedKeyUpstream(ctx context.Context, route models.Route,
 // without being held against the key or the proxy. It returns the last
 // response (body still open), else the last error, plus the number of
 // attempts made.
-func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies map[config.Tier][]byte, ids identity.RequestIDs, attemptOffset int) (*http.Response, error, int) {
+func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies map[config.Tier][]byte, ids identity.RequestIDs, attemptOffset int) (response *http.Response, resultErr error, resultAttempts int) {
 	var lastResponse *http.Response
+	defer func() {
+		if lastResponse != nil && lastResponse != response {
+			httpx.DrainAndClose(lastResponse.Body)
+		}
+	}()
 	var lastErr error
 	nodes := g.zenNodes
 	baseURL := g.cfg.Upstream.Zen
@@ -970,10 +1007,7 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 			meta.Attempts = attemptOffset + attempts
 			meta.Tier = string(route.Tier)
 		}
-		if lastResponse != nil {
-			httpx.DrainAndClose(lastResponse.Body)
-			lastResponse = nil
-		}
+		bufferRetryResponse(lastResponse)
 		req, err := upstreamRequest(ctx, baseURL, route.Protocol, body, ids, node.key)
 		if err != nil {
 			return nil, err, attempts
@@ -1003,12 +1037,13 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 			resp, err = doInferenceAttempt(g.inferenceClient(proxy, baseURL, route.ID), req, time.Duration(g.cfg.Performance.FirstEventTimeoutSeconds)*time.Second, g.attemptTimeout)
 		}
 		attemptDuration := time.Since(attemptStarted)
+		lastResponse = replaceRetryResponse(lastResponse, resp)
 		if ctx.Err() != nil {
 			// The request budget expired while this attempt was in flight. A
 			// canceled context says nothing about the key or the proxy: without
 			// this guard the instant DeadlineExceeded would cool a healthy key
 			// and evict a healthy proxy from the pool.
-			lastResponse, lastErr = resp, err
+			lastErr = err
 			if lastErr == nil && lastResponse == nil {
 				lastErr = ctx.Err()
 			}
@@ -1037,7 +1072,6 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 			g.logger.Debug("upstream rejected a non-retryable request", "component", "upstream", "event", "attempt_rejected", "request_id", ids.Request, "attempt", attempts, "tier", route.Tier, "key_id", keyID, "status", resp.StatusCode, "proxy", proxyLabel, "duration_ms", attemptDuration.Milliseconds())
 			return resp, nil, attempts
 		}
-		lastResponse = resp
 		if useWARP && errors.Is(err, errWARPUnavailable) {
 			// No exit at all: another key would only wait on the same pool.
 			lastErr = err
@@ -1053,6 +1087,9 @@ func (g *Gateway) doKeyUpstream(ctx context.Context, route models.Route, bodies 
 		} else {
 			g.logger.Debug("upstream returned a retryable response", "component", "upstream", "event", "attempt_retryable_response", "request_id", ids.Request, "attempt", attempts, "tier", route.Tier, "key_id", keyID, "status", resp.StatusCode, "proxy", proxyLabel, "duration_ms", attemptDuration.Milliseconds())
 		}
+	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return nil, ctx.Err(), attempts
 	}
 	if lastResponse != nil {
 		return lastResponse, nil, attempts

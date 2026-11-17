@@ -54,6 +54,7 @@
             <div class="nav-group-title" data-i18n="nav.group.runtime">运行</div>
             <button class="nav-item active" data-page="overview" data-i18n="nav.overview">概览</button>
             <button class="nav-item" data-page="diagnostics" data-i18n="nav.diagnostics">诊断</button>
+            <button class="nav-item" data-page="warp-blacklist" data-i18n="nav.warp-blacklist">WARP 黑名单</button>
           </div>
           <div class="nav-group">
             <div class="nav-group-title" data-i18n="nav.group.integration">接入</div>
@@ -626,6 +627,74 @@
               </div>
               <p class="section-caption" data-i18n="apikeys.note">
                 停用和删除会使对应应用的新请求返回 401。至少保留一个启用的 Key。
+              </p>
+            </section>
+          </section>
+
+          <section id="page-warp-blacklist" class="page hidden">
+            <section class="section">
+              <div class="section-head">
+                <div>
+                  <h2 class="section-title">WARP 出口黑名单</h2>
+                  <p class="section-caption">
+                    上游按公网出口段单独计算免费额度；额度用尽后该段会被自动拉黑 24 小时。这里可以查看、补封或提前解封。
+                  </p>
+                </div>
+                <div class="actions">
+                  <button id="warp-blacklist-refresh" class="btn btn-sm btn-ghost">刷新</button>
+                  <button id="warp-blacklist-reload" class="btn btn-sm btn-ghost">从磁盘重载</button>
+                </div>
+              </div>
+              <p class="section-caption" role="status" aria-live="polite">
+                <span id="warp-blacklist-count"></span>
+                <span id="warp-blacklist-status" class="mono"></span>
+              </p>
+              <form id="warp-blacklist-form">
+                <div class="form-grid">
+                  <div class="field">
+                    <label for="warp-blacklist-subnet">网段或地址</label>
+                    <input
+                      id="warp-blacklist-subnet"
+                      placeholder="例如 2606:4700:4700::/64 或 1.2.3.4"
+                      required
+                    />
+                  </div>
+                  <div class="field">
+                    <label for="warp-blacklist-hours">封禁时长（小时）</label>
+                    <input
+                      id="warp-blacklist-hours"
+                      type="number"
+                      min="1"
+                      max="720"
+                      step="1"
+                      value="24"
+                    />
+                  </div>
+                </div>
+                <div class="actions">
+                  <button id="warp-blacklist-ban" class="btn btn-sm btn-primary">加入黑名单</button>
+                </div>
+              </form>
+            </section>
+            <section class="section">
+              <h2 class="section-title">当前封禁</h2>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>网段</th>
+                      <th>到期时间</th>
+                      <th>剩余</th>
+                      <th>来源</th>
+                      <th>活跃出口</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="warp-blacklist-list"></tbody>
+                </table>
+              </div>
+              <p class="section-caption">
+                手动封禁会立刻退掉该段上空闲的出口；正在传输的请求走完再退出。改完状态文件点「从磁盘重载」即可生效，无需重启。
               </p>
             </section>
           </section>

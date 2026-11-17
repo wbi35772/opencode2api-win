@@ -17,14 +17,22 @@ import (
 // while a new session on the same exit succeeds. Rotating the exit in that
 // situation burns the whole pool for 24 hours without fixing the request.
 //
+// The same guard also tracks the conversation's project bucket. The free tier
+// ledges quota per project id and egress together, so a spent project bucket
+// answers 429 on every fresh session and exit the guard can mint. A
+// FreeUsageLimitError therefore burns the project generation too, and the
+// conversation keeps running on the derived replacement until that bucket is
+// spent as well.
+//
 // Generation zero is the id derived from the client conversation. Every burn
 // increments the generation; the id sent upstream is a stable, canonical
 // ses_... value derived from (base, generation), so every later request of the
 // same conversation uses the same replacement session and keeps prompt-cache
 // affinity until that one is spent too.
 type sessionGuard struct {
-	mu   sync.Mutex
-	gens map[string]int
+	mu    sync.Mutex
+	gens  map[string]int
+	pgens map[string]int
 }
 
 // sessionGuardMaxEntries bounds the per-process generation table. Conversations
@@ -33,7 +41,7 @@ type sessionGuard struct {
 const sessionGuardMaxEntries = 4096
 
 func newSessionGuard() *sessionGuard {
-	return &sessionGuard{gens: make(map[string]int)}
+	return &sessionGuard{gens: make(map[string]int), pgens: make(map[string]int)}
 }
 
 // Resolve returns the session id currently assigned to base: base itself for
@@ -81,9 +89,53 @@ func (s *sessionGuard) Generation(base string) int {
 	return s.gens[base]
 }
 
-// ResolveIDs rewrites the session headers of ids to their current generation.
-// A child session is resolved on its own key, except when it is the same value
-// as the parent: then it must keep following the parent's rotation.
+// ResolveProject returns the project id currently assigned to base: base itself
+// for generation zero, or the derived replacement after one or more burns.
+func (s *sessionGuard) ResolveProject(base string) string {
+	if s == nil || base == "" {
+		return base
+	}
+	s.mu.Lock()
+	gen := s.pgens[base]
+	s.mu.Unlock()
+	return rotatedProjectID(base, gen)
+}
+
+// RotateProject burns base's current project generation and returns the next
+// one. It is called when the upstream answers FreeUsageLimitError: the
+// conversation's project bucket is spent, so the retry must land in a fresh
+// bucket instead of replaying the exhausted name on every new exit.
+func (s *sessionGuard) RotateProject(base string) string {
+	if s == nil || base == "" {
+		return base
+	}
+	s.mu.Lock()
+	if len(s.pgens) >= sessionGuardMaxEntries {
+		for key := range s.pgens {
+			delete(s.pgens, key)
+			break
+		}
+	}
+	s.pgens[base]++
+	gen := s.pgens[base]
+	s.mu.Unlock()
+	return rotatedProjectID(base, gen)
+}
+
+// ProjectGeneration reports how many times base's project has been rotated in
+// this process.
+func (s *sessionGuard) ProjectGeneration(base string) int {
+	if s == nil || base == "" {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pgens[base]
+}
+
+// ResolveIDs rewrites the session and project headers of ids to their current
+// generation. A child session is resolved on its own key, except when it is the
+// same value as the parent: then it must keep following the parent's rotation.
 func (s *sessionGuard) ResolveIDs(ids identity.RequestIDs) identity.RequestIDs {
 	baseSession, baseChild := ids.Session, ids.ChildSession
 	ids.Session = s.Resolve(baseSession)
@@ -94,6 +146,7 @@ func (s *sessionGuard) ResolveIDs(ids identity.RequestIDs) identity.RequestIDs {
 			ids.ChildSession = s.Resolve(baseChild)
 		}
 	}
+	ids.Project = s.ResolveProject(ids.Project)
 	return ids
 }
 
@@ -119,4 +172,15 @@ func rotatedSessionID(base string, generation int) string {
 		return base
 	}
 	return identity.CanonicalSessionID(base + "\x00session-rotation\x00" + strconv.Itoa(generation))
+}
+
+// rotatedProjectID derives the canonical upstream project id for one generation
+// of a conversation. Generation zero is the client's own project, so the very
+// first request of a conversation keeps its cache affinity; every burn derives
+// a fresh stable bucket instead of replaying the spent one.
+func rotatedProjectID(base string, generation int) string {
+	if generation <= 0 || base == "" {
+		return base
+	}
+	return identity.CanonicalProjectID(base + "\x00project-rotation\x00" + strconv.Itoa(generation))
 }

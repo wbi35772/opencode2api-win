@@ -23,6 +23,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -115,11 +116,11 @@ func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Metrics, war
 		return nil, err
 	}
 	cooldown := time.Duration(cfg.Performance.FailureCooldownSeconds) * time.Second
-	zenNodes, err := nodePool(cfg.ZenKeys, transports, cooldown)
+	zenNodes, err := nodePool(cfg.ZenKeys, transports, cooldown, cfg.ProxyBindings)
 	if err != nil {
 		return nil, fmt.Errorf("zen node pool: %w", err)
 	}
-	goNodes, err := nodePool(cfg.GoKeys, transports, cooldown)
+	goNodes, err := nodePool(cfg.GoKeys, transports, cooldown, cfg.ProxyBindings)
 	if err != nil {
 		return nil, fmt.Errorf("go node pool: %w", err)
 	}
@@ -677,6 +678,22 @@ func (g *Gateway) prepareRouteBodies(from wire.Protocol, route models.Route, inp
 	return bodies, nil
 }
 
+// maxClientRetryAfter bounds the Retry-After the gateway relays downstream. An
+// upstream free-tier quota window is many hours long, but it describes the exit
+// that answered, not the request: the next attempt draws a different egress.
+// Passing the window through verbatim makes the client park the whole
+// conversation for that long even after the pool has recovered, so the relayed
+// hint is capped instead.
+const maxClientRetryAfter = 60 * time.Second
+
+// relayedRetryAfter keeps a short upstream hint and caps a long one.
+func relayedRetryAfter(value string) string {
+	if parseRetryAfter(value) > maxClientRetryAfter {
+		return strconv.Itoa(int(maxClientRetryAfter / time.Second))
+	}
+	return value
+}
+
 // copyErrorResponse relays a non-2xx upstream reply as an error in the
 // client's protocol. It keeps the status and any Retry-After, and takes the
 // message from a JSON body's error.message or message, falling back to the
@@ -684,7 +701,7 @@ func (g *Gateway) prepareRouteBodies(from wire.Protocol, route models.Route, inp
 func copyErrorResponse(w http.ResponseWriter, protocol wire.Protocol, resp *http.Response, requestID string) {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
-		w.Header().Set("Retry-After", retryAfter)
+		w.Header().Set("Retry-After", relayedRetryAfter(retryAfter))
 	}
 	message := http.StatusText(resp.StatusCode)
 	var value map[string]any

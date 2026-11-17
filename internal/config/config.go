@@ -11,7 +11,9 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
 
+	"opencode2api/internal/goauth"
 	"opencode2api/internal/jsonutil"
 	wire "opencode2api/internal/protocol"
 	"opencode2api/internal/warp"
@@ -32,10 +34,12 @@ type Config struct {
 	ServerKeyMetadata map[string]ServerKeyMetadata `json:"server_key_metadata,omitempty"`
 	ZenKeys           []string                     `json:"zen_keys"`
 	GoKeys            []string                     `json:"go_keys"`
+	GoSubscription    *goauth.Connection           `json:"go_subscription,omitempty"`
 	Anonymous         bool                         `json:"anonymous"`
 	Warp              WarpConfig                   `json:"warp"`
 	Proxies           []string                     `json:"proxies"`
 	ProxyFile         string                       `json:"proxyfile"`
+	ProxyBindings     map[string]string            `json:"proxy_bindings,omitempty"`
 	Upstream          UpstreamConfig               `json:"upstream"`
 	Retry             RetryConfig                  `json:"retry"`
 	Models            ModelsConfig                 `json:"models"`
@@ -63,6 +67,46 @@ type ReasoningConfig struct {
 	// never set, matching how the rest of the optional surface is persisted.
 	Effort        string            `json:"effort,omitempty"`
 	EffortByModel map[string]string `json:"effort_by_model,omitempty"`
+}
+
+// PromptEnvironmentConfig holds optional upstream prompt environment overrides.
+// These fields are injected into the model request and can influence tool
+// availability, platform detection, and git-repo awareness.
+type PromptEnvironmentConfig struct {
+	WorkingDirectory string `json:"working_directory,omitempty"`
+	WorkspaceRoot    string `json:"workspace_root,omitempty"`
+	Platform         string `json:"platform,omitempty"`
+	IsGitRepo        *bool  `json:"is_git_repo,omitempty"`
+}
+
+// Normalize validates and canonicalizes the prompt environment fields.
+func (e *PromptEnvironmentConfig) Normalize() error {
+	if e == nil {
+		return nil
+	}
+	for name, value := range map[string]string{
+		"working_directory": e.WorkingDirectory,
+		"workspace_root":    e.WorkspaceRoot,
+	} {
+		for _, r := range value {
+			if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' || r == '<' || r == '>' {
+				return fmt.Errorf("upstream.prompt_environment.%s must not contain control characters, line separators, or angle brackets", name)
+			}
+		}
+	}
+	platform := strings.ToLower(strings.TrimSpace(e.Platform))
+	if platform == "windows" {
+		platform = "win32"
+	}
+	switch platform {
+	case "", "linux", "darwin", "win32":
+	default:
+		return errors.New("upstream.prompt_environment.platform must be linux, darwin, win32, windows, or empty")
+	}
+	e.WorkingDirectory = strings.TrimSpace(e.WorkingDirectory)
+	e.WorkspaceRoot = strings.TrimSpace(e.WorkspaceRoot)
+	e.Platform = platform
+	return nil
 }
 
 // WarpConfig controls the optional Cloudflare WARP egress. While enabled,
@@ -156,6 +200,10 @@ type UpstreamConfig struct {
 	// free models and its call site is commented out. Empty means
 	// https://opencode.ai/inference.
 	Anonymous string `json:"anonymous"`
+	// PromptEnvironment overrides the working directory, workspace root,
+	// platform and git-repo flag injected into the official prompt. It lets a
+	// gateway host present the client's environment instead of its own.
+	PromptEnvironment *PromptEnvironmentConfig `json:"prompt_environment,omitempty"`
 }
 
 // RetryConfig bounds the upstream retries. MaxAttempts caps the attempts of a
@@ -177,6 +225,10 @@ type ModelsConfig struct {
 	// FreeOnly limits discovery and routing to free models, even when Zen or
 	// Go keys could serve paid ones. Free models may still fall back to keys.
 	FreeOnly bool `json:"free_only"`
+	// ActiveProbes enables background active inference requests for free model
+	// health checks. When false (default), availability is learned passively
+	// from actual user requests, eliminating quota consumption from synthetic probes.
+	ActiveProbes bool `json:"active_probes,omitempty"`
 	// AnonymousBackoff configures a circuit breaker for the keyless lane:
 	// after Threshold consecutive failed attempts, or when every exit is under
 	// the free tier's IP block, the lane pauses for BaseHours, doubling on
@@ -357,6 +409,26 @@ func Normalize(path string, cfg Config) (Config, error) {
 	if err := resolveProxyFiles(path, &cfg); err != nil {
 		return Config{}, err
 	}
+	if cfg.GoSubscription != nil {
+		connection := *cfg.GoSubscription
+		if err := connection.Validate(); err != nil {
+			return Config{}, errors.New("go_subscription contains an invalid credential or unsupported subscription route")
+		}
+		connection.Proxy = strings.TrimSpace(connection.Proxy)
+		if connection.Proxy != "" {
+			matched := false
+			for _, proxy := range cfg.RuntimeProxies() {
+				if proxy == connection.Proxy {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return Config{}, errors.New("go_subscription.proxy must name a configured proxy")
+			}
+		}
+		cfg.GoSubscription = &connection
+	}
 	if cfg.Prefer != TierZen && cfg.Prefer != TierGo {
 		return Config{}, errors.New("prefer must be \"zen\" or \"go\"")
 	}
@@ -368,6 +440,17 @@ func Normalize(path string, cfg Config) (Config, error) {
 	cfg.Upstream.Anonymous = strings.TrimSpace(cfg.Upstream.Anonymous)
 	if cfg.Upstream.Anonymous == "" {
 		cfg.Upstream.Anonymous = "https://opencode.ai/inference"
+	}
+	if cfg.Upstream.PromptEnvironment != nil {
+		environment := *cfg.Upstream.PromptEnvironment
+		if err := environment.Normalize(); err != nil {
+			return Config{}, err
+		}
+		if environment.IsGitRepo != nil {
+			isGitRepo := *environment.IsGitRepo
+			environment.IsGitRepo = &isGitRepo
+		}
+		cfg.Upstream.PromptEnvironment = &environment
 	}
 	for name, raw := range map[string]string{"upstream.zen": cfg.Upstream.Zen, "upstream.go": cfg.Upstream.Go, "upstream.anonymous": cfg.Upstream.Anonymous} {
 		u, err := url.Parse(strings.TrimSpace(raw))
@@ -381,7 +464,7 @@ func Normalize(path string, cfg Config) (Config, error) {
 	if cfg.FirstEnabledServerKey() == "" {
 		return Config{}, errors.New("at least one server key must remain enabled")
 	}
-	if !cfg.Anonymous && len(cfg.ZenKeys) == 0 && len(cfg.GoKeys) == 0 {
+	if !cfg.Anonymous && len(cfg.ZenKeys) == 0 && len(cfg.GoKeys) == 0 && cfg.GoSubscription == nil {
 		return Config{}, errors.New("zen_keys or go_keys must contain at least one upstream key unless anonymous is enabled")
 	}
 	if cfg.Retry.MaxAttempts < 1 {
@@ -455,6 +538,9 @@ func Normalize(path string, cfg Config) (Config, error) {
 		if model == "" || !wire.Valid(wire.Protocol(protocol)) {
 			return Config{}, fmt.Errorf("models.protocols contains invalid mapping %q: %q", model, protocol)
 		}
+	}
+	if err := normalizeProxyBindings(&cfg); err != nil {
+		return Config{}, err
 	}
 	if err := normalizeReasoning(&cfg); err != nil {
 		return Config{}, err
@@ -589,5 +675,79 @@ func Clone(cfg Config) Config {
 		}
 		cfg.Reasoning.EffortByModel = efforts
 	}
+	if cfg.Upstream.PromptEnvironment != nil {
+		environment := *cfg.Upstream.PromptEnvironment
+		if environment.IsGitRepo != nil {
+			isGitRepo := *environment.IsGitRepo
+			environment.IsGitRepo = &isGitRepo
+		}
+		cfg.Upstream.PromptEnvironment = &environment
+	}
+	if cfg.ProxyBindings != nil {
+		bindings := make(map[string]string, len(cfg.ProxyBindings))
+		for k, v := range cfg.ProxyBindings {
+			bindings[k] = v
+		}
+		cfg.ProxyBindings = bindings
+	}
 	return cfg
+}
+
+func cloneGoSubscription(source *goauth.Connection) *goauth.Connection {
+	if source == nil {
+		return nil
+	}
+	connection := *source
+	connection.Routes = make(map[string]goauth.Route, len(source.Routes))
+	for model, route := range source.Routes {
+		connection.Routes[model] = route
+	}
+	return &connection
+}
+
+// normalizeProxyBindings validates and canonicalizes explicit per-key proxy
+// bindings. Keys are mapped to their 16-hex fingerprint so secrets are never
+// stored twice, and target proxies must match a valid runtime proxy (or "direct").
+// Bound credentials fail closed: when their assigned proxy becomes unavailable,
+// they do not migrate to another route.
+func normalizeProxyBindings(cfg *Config) error {
+	if len(cfg.ProxyBindings) == 0 {
+		return nil
+	}
+	keyMap := make(map[string]string, len(cfg.ZenKeys)+len(cfg.GoKeys))
+	for _, k := range cfg.ZenKeys {
+		fp := Fingerprint(k)
+		keyMap[k] = fp
+		keyMap[fp] = fp
+	}
+	for _, k := range cfg.GoKeys {
+		fp := Fingerprint(k)
+		keyMap[k] = fp
+		keyMap[fp] = fp
+	}
+	knownProxies := make(map[string]string)
+	for _, raw := range cfg.RuntimeProxies() {
+		clean, _ := ParseProxyEntry(raw)
+		knownProxies[raw] = raw
+		knownProxies[clean] = raw
+		if clean == "direct" {
+			knownProxies["direct"] = "direct"
+		}
+	}
+	normalized := make(map[string]string, len(cfg.ProxyBindings))
+	for keyRef, proxyRef := range cfg.ProxyBindings {
+		trimmedKey := strings.TrimSpace(keyRef)
+		trimmedProxy := strings.TrimSpace(proxyRef)
+		fp, ok := keyMap[trimmedKey]
+		if !ok {
+			return fmt.Errorf("proxy_bindings contains reference to unknown key %q", MaskValue(trimmedKey))
+		}
+		canonicalProxy, ok := knownProxies[trimmedProxy]
+		if !ok {
+			return fmt.Errorf("proxy_bindings references unknown proxy %q", RedactURL(trimmedProxy))
+		}
+		normalized[fp] = canonicalProxy
+	}
+	cfg.ProxyBindings = normalized
+	return nil
 }

@@ -139,7 +139,9 @@ func TestPreloadFor(t *testing.T) {
 		{2, 2},
 		{4, 4},
 		{8, 8},
-		{10, maxPreload},
+		{10, 10},
+		{12, 12},
+		{16, maxPreload},
 		{32, maxPreload},
 	}
 	for _, test := range cases {

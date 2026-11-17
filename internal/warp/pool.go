@@ -19,9 +19,11 @@ import (
 const DefaultPoolSize = 4
 
 // maxPreload bounds how many exits are registered eagerly at startup. The rest
-// of a larger pool still grows on demand, so a 32-exit ceiling does not hammer
-// the registration API just to sit idle.
-const maxPreload = 8
+// of a larger pool still grows on demand, so a bigger ceiling does not hammer
+// the registration API just to sit idle. Warm exits are the only capacity a
+// burst can draw on, and a spent /64 forces a replacement mid-burst, so the
+// floor is kept above one replacement's worth of headroom.
+const maxPreload = 12
 
 // egressCooldown keeps a public /64 (or IPv4 /32) that the upstream has
 // rejected out of the pool for this long. The free tier scopes its quota to
@@ -56,12 +58,15 @@ const refillRetryDelay = 5 * time.Second
 
 // A pool can only hold as many exits as Cloudflare hands out distinct egress
 // blocks. When preload is larger than that supply, every extra registration is
-// a duplicate; after a few in a row the pool stops trying for a while instead
-// of hammering the registration API forever.
+// a duplicate; after a few in a row the pool backs off instead of hammering the
+// registration API forever. The backoff stays short: a duplicate draw says
+// nothing about the next draw (WARP picks a random block every time), and a
+// long pause here is exactly what turns a burst of spent /64s into minutes of
+// "no ready egress" for live conversations.
 const (
 	refillFailureThreshold = 3
-	refillBackoffBase      = time.Minute
-	refillBackoffMax       = 5 * time.Minute
+	refillBackoffBase      = 15 * time.Second
+	refillBackoffMax       = time.Minute
 )
 
 // firstDuplicateRetryDelay spaces out first-exit attempts when Cloudflare keeps
@@ -183,6 +188,7 @@ type Pool struct {
 	next          int
 	reserved      map[string]bool
 	cooling       map[string]time.Time
+	manual        map[string]bool
 	falsePositive map[string]bool
 	changed       chan struct{}
 	closed        bool
@@ -367,7 +373,7 @@ func newPool(ctx context.Context, log logger, size int, statePath string, create
 	// cancel every later refill and replacement with "context canceled",
 	// leaving the pool stuck on its first egress forever.
 	poolCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	cooling, _ := loadPenalties(statePath)
+	cooling, manual := loadPenalties(statePath)
 	p := &Pool{
 		ctx:       poolCtx,
 		cancel:    cancel,
@@ -379,6 +385,7 @@ func newPool(ctx context.Context, log logger, size int, statePath string, create
 		reserved:  make(map[string]bool),
 		affinity:  make(map[string]*exit),
 		cooling:   cooling,
+		manual:    manual,
 		changed:   make(chan struct{}),
 	}
 	if log != nil && len(p.cooling) > 0 {
@@ -857,36 +864,43 @@ func (p *Pool) penalize(bad *exit, reason string, retryAfter time.Duration, kind
 
 // coolingState is the on-disk form of the pool's penalty memory. Only rejected
 // public blocks and their expiry are stored; fixed 24h blacklist, no strikes.
-// and tokens stay out of it.
+// and tokens stay out of it. Manual marks a block an operator banned by hand so
+// the WebUI can tell it apart from an upstream quota penalty.
 type coolingState struct {
 	Cooling       map[string]time.Time `json:"cooling"`
+	Manual        map[string]bool      `json:"manual,omitempty"`
 	FalsePositive map[string]bool      `json:"false_positive"`
 }
 
 // loadPenalties reads the persisted egress cooldowns (fixed 24h blacklist). Cooling
 // entries whose window has already ended are dropped; the cooldown is a fixed 24h blacklist. A
 // missing or unreadable file yields empty state: the pool must still start when
-// the file is gone or corrupt.
-func loadPenalties(path string) (map[string]time.Time, map[string]int) {
+// the file is gone or corrupt. The second result marks the blocks an operator
+// banned by hand.
+func loadPenalties(path string) (map[string]time.Time, map[string]bool) {
 	cooling := make(map[string]time.Time)
+	manual := make(map[string]bool)
 	if path == "" {
-		return cooling, nil
+		return cooling, manual
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return cooling, nil
+		return cooling, manual
 	}
 	var state coolingState
 	if err := json.Unmarshal(raw, &state); err != nil {
-		return cooling, nil
+		return cooling, manual
 	}
 	now := time.Now()
 	for key, until := range state.Cooling {
 		if key != "" && until.After(now) {
 			cooling[key] = until
+			if state.Manual[key] {
+				manual[key] = true
+			}
 		}
 	}
-	return cooling, nil
+	return cooling, manual
 }
 
 // saveCooling writes the fixed 24h blacklist beside the config so a restart does not register a block the upstream already rejected. Writes are
@@ -900,12 +914,16 @@ func (p *Pool) saveCooling() {
 	now := time.Now()
 	state := coolingState{
 		Cooling:       make(map[string]time.Time, len(p.cooling)),
+		Manual:        make(map[string]bool, len(p.manual)),
 		FalsePositive: make(map[string]bool),
 	}
 	for key, until := range p.cooling {
 		if until.After(now) {
 			state.Cooling[key] = until
 			state.FalsePositive[key] = p.falsePositive[key]
+			if p.manual[key] {
+				state.Manual[key] = true
+			}
 		}
 	}
 	p.mu.Unlock()
@@ -1240,6 +1258,7 @@ func (p *Pool) createExit(ctx context.Context) (*exit, error) {
 		for subnet, until := range p.cooling {
 			if !until.After(now) {
 				delete(p.cooling, subnet)
+				delete(p.manual, subnet)
 			}
 		}
 		usable := key != "" && !p.reserved[key] && !p.cooling[key].After(now)

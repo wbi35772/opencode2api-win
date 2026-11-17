@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>opencode2api-win 基线总览 · 2026-11-17（v1.4.8-win.1）</title>
+<style>
+:root{
+  --bg:#f3f5f9; --panel:#ffffff; --ink:#141a24; --muted:#5d6879; --line:#dfe4ec;
+  --accent:#2457d6; --accent-soft:#eef2ff; --ok:#0e7c66; --ok-soft:#e7f6f1;
+  --warn:#a15c07; --warn-soft:#fff5e3; --err:#b42318; --err-soft:#fdecea;
+  --code:#111827; --code-ink:#e8eef8; --mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",Menlo,monospace;
+  --shadow:0 1px 2px rgba(20,26,36,.04),0 10px 30px rgba(20,26,36,.06);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.app{display:grid;grid-template-columns:264px minmax(0,1fr);min-height:100vh}
+.sidebar{
+  position:sticky;top:0;height:100vh;overflow:auto;padding:22px 18px;
+  background:#fbfcfe;border-right:1px solid var(--line);
+}
+.brand{display:flex;gap:11px;align-items:center;margin-bottom:18px}
+.logo{
+  width:38px;height:38px;border-radius:11px;display:grid;place-items:center;
+  background:linear-gradient(135deg,#2457d6,#6b8cff);color:#fff;font-weight:800;font-size:13px;letter-spacing:.4px;
+  box-shadow:0 6px 16px rgba(36,87,214,.25)
+}
+.brand strong{display:block;font-size:14px;line-height:1.25}
+.brand small{display:block;color:var(--muted);font-size:11px;margin-top:3px}
+.ver{
+  display:inline-flex;align-items:center;gap:7px;padding:5px 10px;border-radius:999px;
+  background:var(--accent-soft);color:var(--accent);font-size:12px;font-weight:700;margin-bottom:16px
+}
+.ver:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px rgba(14,124,102,.15)}
+nav{display:flex;flex-direction:column;gap:2px}
+nav a{padding:7px 9px;border-radius:8px;color:var(--muted);font-size:12.5px;line-height:1.35}
+nav a:hover{background:#f0f3f9;color:var(--ink);text-decoration:none}
+nav a b{color:#aab3c2;font-weight:600;display:inline-block;width:20px}
+.side-foot{margin-top:22px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:11.5px;line-height:1.5}
+.side-foot strong{color:var(--ink);font-size:12.5px}
+main{min-width:0;padding:26px 30px 70px;max-width:1220px;margin:0 auto}
+.hero{
+  position:relative;overflow:hidden;border:1px solid var(--line);border-radius:20px;
+  background:
+    radial-gradient(700px 260px at 92% -10%,rgba(36,87,214,.10),transparent 70%),
+    radial-gradient(520px 220px at 6% 110%,rgba(14,124,102,.08),transparent 70%),
+    linear-gradient(180deg,#fff,#fbfcff);
+  padding:30px 30px 26px;box-shadow:var(--shadow);margin-bottom:22px;
+}
+.hero:after{
+  content:"";position:absolute;inset:0;pointer-events:none;opacity:.45;
+  background-image:linear-gradient(rgba(36,87,214,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(36,87,214,.05) 1px,transparent 1px);
+  background-size:26px 26px;mask-image:linear-gradient(180deg,transparent,#000 60%,transparent)
+}
+.eyebrow{color:var(--accent);font-size:12px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;position:relative;z-index:1}
+h1{position:relative;z-index:1;font-size:clamp(27px,4vw,42px);line-height:1.12;margin:10px 0 8px;letter-spacing:-.8px}
+h1 span{color:var(--muted);font-weight:600;font-size:.62em;letter-spacing:-.2px;white-space:nowrap}
+.lede{position:relative;z-index:1;margin:0;color:var(--muted);max-width:840px;font-size:14.5px}
+.badges{position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:7px;margin:16px 0 20px}
+.badge{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:#fff;border-radius:999px;padding:4px 10px;font-size:11.5px;color:var(--muted)}
+.badge:before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.badge.ok{background:var(--ok-soft);border-color:#c9e9df;color:#0a5f4e}.badge.ok:before{background:var(--ok)}
+.badge.warn{background:var(--warn-soft);border-color:#f0ddb8;color:#7a4706}.badge.warn:before{background:var(--warn)}
+.hero-grid{position:relative;z-index:1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.stat{border:1px solid var(--line);background:rgba(255,255,255,.82);border-radius:13px;padding:12px 13px}
+.stat span{display:block;color:var(--muted);font-size:11px;letter-spacing:.2px}
+.stat strong{display:block;font-size:17px;line-height:1.3;margin:3px 0 2px;letter-spacing:-.3px}
+.stat small{display:block;color:var(--muted);font-size:10.5px;line-height:1.35}
+section{margin:30px 0 0;scroll-margin-top:18px}
+h2{display:flex;align-items:center;gap:10px;margin:0 0 12px;font-size:21px;letter-spacing:-.3px}
+h2 .num{
+  display:inline-grid;place-items:center;width:29px;height:29px;border-radius:9px;
+  background:var(--accent-soft);color:var(--accent);font-size:12px;font-weight:800;flex:none
+}
+h3{margin:20px 0 8px;font-size:15.5px;letter-spacing:-.1px}
+p{margin:8px 0}
+.muted{color:var(--muted)}
+.small{font-size:12.5px}
+.card{border:1px solid var(--line);background:var(--panel);border-radius:15px;padding:17px 18px;box-shadow:var(--shadow)}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.callout{border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:12px;background:#fff;padding:13px 15px;margin:12px 0}
+.callout.ok{border-left-color:var(--ok);background:linear-gradient(180deg,#fff,#f7fdfa)}
+.callout.warn{border-left-color:var(--warn);background:linear-gradient(180deg,#fff,#fffbf2)}
+.callout.err{border-left-color:var(--err);background:linear-gradient(180deg,#fff,#fff7f6)}
+.callout strong{display:block;margin-bottom:3px}
+.callout p:last-child{margin-bottom:0}
+.k{font-family:var(--mono);font-size:12px;background:#f2f5fa;border:1px solid #e3e8f1;border-radius:6px;padding:1px 6px;white-space:nowrap}
+.mono{font-family:var(--mono)}
+.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:13px;background:#fff;box-shadow:var(--shadow)}
+table{width:100%;border-collapse:collapse;font-size:12.8px;min-width:620px}
+th,td{padding:9px 12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+th{background:#f7f9fc;color:#465267;font-size:11.5px;letter-spacing:.3px;font-weight:700;white-space:nowrap}
+td:first-child{white-space:nowrap;color:#4b5668}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:#fbfcff}
+.tag{display:inline-block;border-radius:6px;padding:1px 7px;font-size:10.5px;font-weight:700;line-height:1.7;white-space:nowrap}
+.tag.ok{background:var(--ok-soft);color:#0a5f4e}
+.tag.info{background:var(--accent-soft);color:#1b47b5}
+.tag.warn{background:var(--warn-soft);color:#7a4706}
+.tag.err{background:var(--err-soft);color:#8f1b13}
+.tag.gray{background:#f0f3f8;color:#576274}
+pre{margin:10px 0;background:var(--code);color:var(--code-ink);border-radius:12px;padding:14px 16px;overflow:auto;font:12.2px/1.65 var(--mono);border:1px solid #1f2937}
+pre code{font:inherit;white-space:pre}
+code.inline{font-family:var(--mono);font-size:12px;background:#f2f5fa;border:1px solid #e3e8f1;border-radius:5px;padding:1px 5px}
+.diagram{border:1px solid var(--line);border-radius:15px;background:#fff;padding:14px;box-shadow:var(--shadow);overflow:auto}
+.diagram svg{display:block;width:100%;height:auto;min-width:640px}
+.caption{color:var(--muted);font-size:11.5px;margin:8px 2px 0}
+.caption b{color:#465267}
+.svg-box{fill:#fff;stroke:#cdd6e4;stroke-width:1.2}
+.svg-box-accent{fill:#f4f7ff;stroke:#b9c9f7}
+.svg-box-ok{fill:#f2fbf8;stroke:#bfe6da}
+.svg-box-warn{fill:#fffaf0;stroke:#efdcb8}
+.svg-title{font:700 12.5px "Segoe UI","Noto Sans SC",sans-serif;fill:#1d2736}
+.svg-sub{font:11px "Segoe UI","Noto Sans SC",sans-serif;fill:#647084}
+.svg-label{font:11px "Segoe UI","Noto Sans SC",sans-serif;fill:#647084}
+.svg-arrow{stroke:#8a97ab;stroke-width:1.4;fill:none}
+.svg-arrow-accent{stroke:#2457d6;stroke-width:1.6;fill:none}
+.svg-arrow-dash{stroke:#a15c07;stroke-width:1.4;fill:none;stroke-dasharray:5 4}
+.svg-dot{fill:#2457d6}
+.svg-dot-ok{fill:#0e7c66}
+.svg-dot-warn{fill:#a15c07}
+.timeline{position:relative;margin:8px 0 0;padding-left:22px}
+.timeline:before{content:"";position:absolute;left:6px;top:6px;bottom:6px;width:1px;background:var(--line)}
+.tl{position:relative;padding:0 0 15px}
+.tl:last-child{padding-bottom:0}
+.tl:before{content:"";position:absolute;left:-19px;top:5px;width:9px;height:9px;border-radius:50%;background:#fff;border:2px solid var(--accent)}
+.tl.done:before{background:var(--ok);border-color:var(--ok)}
+.tl time{display:inline-block;font:11px var(--mono);color:var(--muted);margin-right:7px}
+.tl strong{font-size:13px}
+.tl p{margin:2px 0 0;color:var(--muted);font-size:12.3px}
+.bars{display:flex;flex-direction:column;gap:10px;margin-top:4px}
+.bar-row{display:grid;grid-template-columns:190px minmax(0,1fr) 64px;gap:10px;align-items:center;font-size:12px}
+.bar-row .track{height:9px;border-radius:999px;background:#eef1f6;overflow:hidden;border:1px solid #e3e8f1}
+.bar-row .track i{display:block;height:100%;width:var(--w);min-width:5px;border-radius:999px;background:var(--c,var(--accent))}
+.bar-row b{font:700 11.5px var(--mono);text-align:right;color:#465267}
+.bar-row .lbl{color:#465267;line-height:1.35}
+.legend{display:flex;flex-wrap:wrap;gap:13px;margin-top:8px;color:var(--muted);font-size:11.5px}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.legend i{width:16px;height:3px;border-radius:2px;background:var(--accent);display:inline-block}
+.legend i.warn{background:var(--warn)}
+.legend i.ok{background:var(--ok)}
+.checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:8px 0}
+.check{display:flex;gap:9px;align-items:flex-start;border:1px solid var(--line);border-radius:10px;padding:9px 10px;background:#fff;font-size:12.3px}
+.check .mark{width:17px;height:17px;border-radius:50%;background:var(--ok-soft);color:var(--ok);display:grid;place-items:center;font-size:11px;font-weight:800;flex:none;margin-top:1px}
+.check .mark.w{background:var(--warn-soft);color:var(--warn)}
+.check b{display:block;font-size:12.5px}
+.check small{display:block;color:var(--muted);line-height:1.45;margin-top:1px}
+.file-list{columns:2;column-gap:24px;margin:6px 0 0;padding-left:18px;font-size:12px;color:#4b5668}
+.file-list li{break-inside:avoid;margin:0 0 4px}
+.footer{margin-top:36px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:11.5px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.to-top{position:fixed;right:18px;bottom:18px;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:#fff;border:1px solid var(--line);color:var(--accent);box-shadow:var(--shadow);font-size:15px}
+.to-top:hover{text-decoration:none;background:var(--accent-soft)}
+@media (max-width:980px){
+  .app{grid-template-columns:1fr}
+  .sidebar{position:relative;height:auto;border-right:0;border-bottom:1px solid var(--line);padding:16px 18px}
+  nav{flex-direction:row;overflow:auto;gap:4px;padding-bottom:2px}
+  nav a{white-space:nowrap;background:#f4f7fb}
+  .side-foot{display:none}
+  main{padding:20px 16px 54px}
+  .hero{padding:24px 18px 20px;border-radius:16px}
+  .hero-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .g3,.g4{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .bar-row{grid-template-columns:140px minmax(0,1fr) 56px}
+  .file-list{columns:1}
+}
+@media (max-width:620px){
+  .g2,.g3,.g4,.checks{grid-template-columns:1fr}
+  h1 span{display:block;margin-top:4px}
+  .bar-row{grid-template-columns:1fr 54px}
+  .bar-row .lbl{grid-column:1/-1}
+  .bar-row .track{grid-column:1/2}
+  .bar-row b{grid-column:2/3}
+}
+@media print{
+  .sidebar,.to-top{display:none}
+  .app{display:block}
+  main{max-width:none;padding:0}
+  body{background:#fff}
+  .hero,.card,.diagram,.table-wrap{box-shadow:none}
+  section{break-inside:avoid}
+}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+  <div class="brand">
+    <div class="logo">o2</div>
+    <div><strong>opencode2api</strong><small>Windows 独立部署 · 基线文档</small></div>
+  </div>
+  <div class="ver">v1.4.8-win.1 · 已部署</div>
+  <nav>
+    <a href="#summary"><b>00</b>先看结论</a>
+    <a href="#baseline"><b>01</b>版本与基线</a>
+    <a href="#today"><b>02</b>今天的修复</a>
+    <a href="#upstream"><b>03</b>上游 v1.4.8</a>
+    <a href="#free"><b>04</b>免费道原理</a>
+    <a href="#evidence"><b>05</b>验证证据</a>
+    <a href="#config"><b>06</b>当前配置</a>
+    <a href="#deploy"><b>07</b>部署与回滚</a>
+    <a href="#maintain"><b>08</b>维护与升级</a>
+    <a href="#trouble"><b>09</b>排障矩阵</a>
+    <a href="#files"><b>10</b>变更文件</a>
+  </nav>
+  <div class="side-foot">
+    基线日期<br><strong>2026-11-17</strong><br><br>
+    上游基线<br><strong>v1.4.8 / 159d7fdf</strong><br><br>
+    维护入口<br>doc/12 · BASELINE.md · CHANGELOG.md
+  </div>
+</aside>
+
+<main>
+<header class="hero">
+  <div class="eyebrow">opencode2api · Windows x64 · 匿名免费道</div>
+  <h1>基线总览 <span>2026-11-17</span></h1>
+  <p class="lede">这份画布记录 <b>v1.4.8-win.1</b> 的代码基线、运行基线、免费道修复、验证证据、部署回滚和下一次升级步骤。图文都来自本机真实进程与真实请求；未执行的项会明确标注。</p>
+  <div class="badges">
+    <span class="badge ok">已部署</span>
+    <span class="badge ok">免费道已打通</span>
+    <span class="badge">上游 v1.4.8</span>
+    <span class="badge">Go 1.24.0</span>
+    <span class="badge">WARP ready</span>
+    <span class="badge warn">无账号 Key</span>
+  </div>
+  <div class="hero-grid">
+    <div class="stat"><span>版本</span><strong>v1.4.8-win.1</strong><small>upstream 159d7fdf</small></div>
+    <div class="stat"><span>模型</span><strong>86 / 12</strong><small>catalog / exposed</small></div>
+    <div class="stat"><span>WARP 池</span><strong>32 / 12</strong><small>size / preload</small></div>
+    <div class="stat"><span>免费道实测</span><strong>200 OK</strong><small>29.1s · 35.1s · 8.0s</small></div>
+  </div>
+</header>
+
+<section id="summary">
+  <h2><span class="num">00</span>先看结论</h2>
+  <div class="grid g3">
+    <div class="card">
+      <span class="tag ok">已修复</span>
+      <h3 style="margin-top:9px">429 不是单一原因</h3>
+      <p class="small muted">旧二进制发送 <span class="k">clint_</span> 工具名，上游免费层直接拒绝；同时 WARP 状态文件里 13 个出口已烧掉，池子又太小。三层叠加，才表现为“有时 200、带 tools 就空响应”。</p>
+    </div>
+    <div class="card">
+      <span class="tag info">已对齐</span>
+      <h3 style="margin-top:9px">上游 v1.4.8 五个提交</h3>
+      <p class="small muted">#182 工具名前缀、重试与响应所有权硬化、title 回退、Playground 固定中转、Go 订阅占位。未发版的 <span class="k">0d05fe93</span> 没有移植。</p>
+    </div>
+    <div class="card">
+      <span class="tag warn">使用边界</span>
+      <h3 style="margin-top:9px">免费配额按出口烧</h3>
+      <p class="small muted">配额单位是 <b>(project, 出口 /64)</b>。一个成功请求消耗一个出口，池子约每 30–40 秒补一个；连续猛发仍会短时 429，等 2–4 分钟或重置状态文件即可。</p>
+    </div>
+  </div>
+  <div class="callout ok">
+    <strong>一句话基线</strong>
+    <p>源码对齐上游 v1.4.8，Windows 产物为 v1.4.8-win.1；匿名免费道在无任何账号 Key 的情况下完成极简、带 tools 非流式、带 tools 流式三类 200 验证。当前运行进程只依赖本机 Clash 7897 提供 TCP 注册与 SOCKS5 UDP 中继。</p>
+  </div>
+</section>
+
+<section id="baseline">
+  <h2><span class="num">01</span>版本与基线</h2>
+  <p class="muted small">基线不是一句版本号。下面四组值分别锁定“代码从哪来、二进制怎么构建、进程怎么跑、请求怎么验证”。下次升级时逐项对比。</p>
+  <div class="grid g4" style="margin-top:12px">
+    <div class="card"><span class="tag info">代码</span><h3>v1.4.8 / 159d7fdf</h3><p class="small muted">上游 2026-11-16T21:34Z 发布；Windows 侧保留 WARP 池、SOCKS5 UDP、启动降级重试等本地补丁。</p></div>
+    <div class="card"><span class="tag ok">构建</span><h3>Go 1.24.0</h3><p class="small muted"><span class="k">CGO_ENABLED=0</span>、<span class="k">-trimpath</span>、<span class="k">-ldflags "-X main.version=v1.4.8-win.1"</span>，产物 19,871,232 B。</p></div>
+    <div class="card"><span class="tag ok">运行</span><h3>PID 25236</h3><p class="small muted">2026-11-16 23:09:32 启动；API <span class="k">0.0.0.0:28080</span>，WebUI <span class="k">127.0.0.1:28081</span>。</p></div>
+    <div class="card"><span class="tag ok">验证</span><h3>vet + test 全绿</h3><p class="small muted">gateway / protocol / warp 三包通过；Linux、Darwin、Windows 交叉构建 exit=0；部署后极简请求 200。</p></div>
+  </div>
+  <div class="table-wrap" style="margin-top:12px">
+    <table>
+      <thead><tr><th>项</th><th>基线值</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>Windows 版本</td><td><b>v1.4.8-win.1</b></td><td>当前唯一发布线；旧版为 v1.4.6-win（2026-11-01）</td></tr>
+        <tr><td>上游提交</td><td><span class="mono">159d7fdf</span></td><td>v1.4.8 发布点；之后 <span class="mono">0d05fe93</span> 未发版、未移植</td></tr>
+        <tr><td>二进制</td><td><span class="mono">opencode2api.exe</span></td><td>19,871,232 B；与 <span class="mono">opencode2api-v1.4.8-win.1.exe</span> 同哈希</td></tr>
+        <tr><td>SHA-256</td><td><span class="mono" style="font-size:11px">BAB8F334330E226CD1CF31A4AEA7FCFCDBB4F3EFEDC533EE4F1946E75F9BC90B</span></td><td>构建与部署一致；发布包内 <span class="mono">SHA256SUMS.txt</span> 同值</td></tr>
+        <tr><td>配置指纹</td><td><span class="mono" style="font-size:11px">2f04eae7daaa961e62005de154cff4119b5cf3faac34328b5838ac5210b8c398</span></td><td><span class="mono">config.json</span> 的 SHA-256；机器相关，换机后重算</td></tr>
+        <tr><td>发布包</td><td><span class="mono">release/opencode2api-v1.4.8-win.1.zip</span></td><td>10,427,331 B；含 exe、README-WIN、CHANGELOG、配置模板、发布说明、校验和</td></tr>
+        <tr><td>旧版备份</td><td><span class="mono">opencode2api.exe.bak-20261116-230522-pre-v1.4.8-win.1</span></td><td>19,953,152 B；回滚直接换回该文件</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout warn">
+    <strong>当前运行态不是“全绿无限制”</strong>
+    <p>最新一次 healthz 为 <span class="k">status=ok</span>、<span class="k">warp.status=ready</span>、<span class="k">active=5</span>、<span class="k">cooling=5</span>。免费道能否成功取决于池子当前是否有可用出口；<span class="k">cooling</span> 是历史记录，不等于全部不可用。WARP 依赖本机 Clash 7897 的 TCP 与 UDP 能力，Clash 节点掉线时会出现 <span class="k">handshake=never rx=0</span>，后台会自动重试。</p>
+  </div>
+</section>
+
+<section id="today">
+  <h2><span class="num">02</span>今天的修复：三层叠加</h2>
+  <p class="muted small">同一个 429 背后有三层独立问题。只修一层，仍会在下一次请求里复现。下面的顺序按“先排除代码、再看出口、最后调容量”排列。</p>
+  <div class="grid g3" style="margin-top:12px">
+    <div class="card">
+      <span class="tag err">第 1 层 · 二进制</span>
+      <h3>旧 exe 发送 <span class="mono">clint_</span></h3>
+      <p class="small muted">旧进程 PID 27404 构建于 19:11，早于 #182。它把客户端工具名统一加上 <span class="k">clint_</span> 前缀，免费层直接回 429；无 tools 的极简请求反而可能 200，形成“200 / 429 混合”的假象。</p>
+      <p class="small"><b>处理：</b>构建并部署 v1.4.8-win.1，确认二进制内 <span class="k">clint_=False</span>、<span class="k">mcp_=True</span>。</p>
+    </div>
+    <div class="card">
+      <span class="tag err">第 2 层 · 出口状态</span>
+      <h3>WARP 状态里全是 spent 出口</h3>
+      <p class="small muted"><span class="k">config.json.warp-state.json</span> 继承了 13–14 个已烧掉的 <span class="mono">/64</span> 冷却记录；池子只有 1 个出口时，同样的流式请求 429/96 秒。</p>
+      <p class="small"><b>处理：</b>备份并重置状态文件，重新注册出口；后台恢复后 active 从 0 长到 4–8。</p>
+    </div>
+    <div class="card">
+      <span class="tag err">第 3 层 · 容量</span>
+      <h3>池子太小、复用太慢</h3>
+      <p class="small muted">原配置 <span class="k">pool_size=16</span>、<span class="k">max_anonymous_exits=0</span>、<span class="k">free_tier_block_seconds=0</span>，出口耗尽后补充慢。</p>
+      <p class="small"><b>处理：</b>改为 32 / 32 / 120 秒；一个成功请求消耗一个出口，池子约每 30–40 秒补一个。</p>
+    </div>
+  </div>
+  <div class="diagram" style="margin-top:12px">
+    <svg viewBox="0 0 1000 380" role="img" aria-label="免费道 429 决策流程">
+      <defs>
+        <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="#8a97ab"/></marker>
+        <marker id="arA" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="#2457d6"/></marker>
+      </defs>
+      <rect x="18" y="146" width="160" height="74" rx="11" class="svg-box"/>
+      <text x="98" y="177" text-anchor="middle" class="svg-title">请求进入</text>
+      <text x="98" y="197" text-anchor="middle" class="svg-sub">OpenAI /chat/completions</text>
+
+      <rect x="206" y="132" width="200" height="102" rx="11" class="svg-box-accent"/>
+      <text x="306" y="158" text-anchor="middle" class="svg-title">选定三元组</text>
+      <text x="306" y="178" text-anchor="middle" class="svg-sub">project · session · exit</text>
+      <text x="306" y="196" text-anchor="middle" class="svg-sub">出口按 /64 去重</text>
+
+      <path d="M178 183 H206" class="svg-arrow" marker-end="url(#ar)"/>
+
+      <path d="M406 183 H472" class="svg-arrow" marker-end="url(#ar)"/>
+      <path d="M540 148 L576 183 L540 218 L504 183 Z" class="svg-box-ok"/>
+      <text x="540" y="179" text-anchor="middle" class="svg-title">200?</text>
+      <text x="540" y="195" text-anchor="middle" class="svg-sub">成功</text>
+
+      <path d="M576 183 H650" class="svg-arrow" marker-end="url(#ar)"/>
+      <rect x="650" y="146" width="180" height="74" rx="11" class="svg-box-ok"/>
+      <text x="740" y="176" text-anchor="middle" class="svg-title">返回响应</text>
+      <text x="740" y="196" text-anchor="middle" class="svg-sub">记录出口成功</text>
+
+      <path d="M540 218 V266" class="svg-arrow" marker-end="url(#ar)"/>
+      <path d="M484 300 L540 264 L596 300 L540 336 Z" class="svg-box-warn"/>
+      <text x="540" y="296" text-anchor="middle" class="svg-title">FreeUsageLimit?</text>
+      <text x="540" y="312" text-anchor="middle" class="svg-sub">429 响应体分类</text>
+
+      <path d="M596 300 H650" class="svg-arrow" marker-end="url(#ar)"/>
+      <rect x="650" y="264" width="210" height="72" rx="11" class="svg-box-warn"/>
+      <text x="755" y="292" text-anchor="middle" class="svg-title">换 session → 换 project</text>
+      <text x="755" y="312" text-anchor="middle" class="svg-sub">退役出口 120s，取下一个</text>
+
+      <path d="M484 300 H438" class="svg-arrow" marker-end="url(#ar)"/>
+      <rect x="260" y="264" width="178" height="72" rx="11" class="svg-box"/>
+      <text x="349" y="292" text-anchor="middle" class="svg-title">普通限速 / 传输错误</text>
+      <text x="349" y="312" text-anchor="middle" class="svg-sub">短退避，不烧出口</text>
+
+      <path d="M755 336 V358 H306 V234" class="svg-arrow-dash" marker-end="url(#ar)"/>
+      <text x="770" y="352" class="svg-label">带新身份重试</text>
+      <text x="60" y="352" class="svg-label">关键：只换出口、不换 session，仍会在新出口重放同一个 429</text>
+    </svg>
+    <div class="caption"><b>图 1</b> 免费道 429 决策。代码先换会话身份，再换 project，最后退役出口；出口在 <span class="mono">free_tier_block_seconds</span> 内不再进入轮换。</div>
+  </div>
+  <div class="timeline" style="margin-top:16px">
+    <div class="tl done"><time>19:11</time><strong>旧 exe 仍在运行</strong><p>构建早于 #182，工具前缀 <span class="mono">clint_</span>；带 tools 的请求被免费层拒绝。</p></div>
+    <div class="tl done"><time>21:34</time><strong>上游发布 v1.4.8</strong><p><span class="mono">159d7fdf</span>；#182 将普通命名空间前缀改为 <span class="mono">mcp_</span>。</p></div>
+    <div class="tl done"><time>22:21</time><strong>免费道调容</strong><p>pool 16→32、max_anonymous_exits 0→32、free_tier_block 0→120；备份 <span class="mono">config.json.bak-20261116-222128</span>。</p></div>
+    <div class="tl done"><time>22:30</time><strong>重置 WARP 状态</strong><p>备份并删除 <span class="mono">config.json.warp-state.json</span>；新出口注册后 active 增长到 4–5。</p></div>
+    <div class="tl done"><time>22:30</time><strong>免费道首次全通</strong><p>极简 200/28.6s；带 tools 非流式 200/35.1s；带 tools 流式 200/8.0s。</p></div>
+    <div class="tl done"><time>22:57</time><strong>构建 v1.4.8-win.1</strong><p><span class="mono">go vet</span> 0、<span class="mono">go test ./...</span> 全绿；交叉构建通过。</p></div>
+    <div class="tl done"><time>23:05</time><strong>部署并重启</strong><p>旧 exe 备份为 <span class="mono">.bak-20261116-230522-pre-v1.4.8-win.1</span>；新进程 PID 25236。</p></div>
+    <div class="tl done"><time>23:22</time><strong>部署后复测</strong><p>healthz version=v1.4.8-win.1；极简 200/29.1s；WARP ready 32/12/active 5。</p></div>
+    <div class="tl done"><time>23:26</time><strong>发布包与画布</strong><p>release/v1.4.8-win.1 + zip 生成；本画布发布。</p></div>
+  </div>
+</section>
+
+<section id="upstream">
+  <h2><span class="num">03</span>上游 v1.4.8 变更</h2>
+  <p class="muted small">五个提交，按“对 Windows 免费道的影响”排序。哈希来自上游 <span class="mono">2bf547c..159d7fdf</span> 的实际提交。</p>
+  <div class="grid g2" style="margin-top:12px">
+    <div class="card"><span class="tag err">关键</span><h3><span class="mono">95575c5f</span> · #182</h3><p class="small muted">把客户端工具从 <span class="k">clint_</span> 改到普通命名空间 <span class="k">mcp_</span>。免费层拒绝 <span class="k">clint_</span>，任意其他前缀可通过；README 不再要求 <span class="k">clint_</span> 描述。</p></div>
+    <div class="card"><span class="tag info">重试</span><h3><span class="mono">14faec76</span></h3><p class="small muted">硬化免费档重试与客户端兼容：响应所有权 defer、保留最近上游 HTTP 错误、title 预判/本地回退、<span class="k">prompt_environment</span>、legacy <span class="k">functions</span> 只改名一次、相邻 assistant 合并。Refs #173/#175/#176/#178/#179/#181。</p></div>
+    <div class="card"><span class="tag info">诊断</span><h3><span class="mono">b296a61</span> · #167</h3><p class="small muted">Playground 请求固定到一个中转，避免每次点击落进新 project 桶导致 429；真实会话仍按固定 project 记账。</p></div>
+    <div class="card"><span class="tag info">构建</span><h3><span class="mono">46eb13ea</span></h3><p class="small muted">修复 #169 后的构建：补 <span class="k">CursorForOffset</span>、<span class="k">ReportWithRetryAfter</span>、<span class="k">HasUntriedActive</span>；<span class="k">title.go</span> 按项目风格重写；删除临时测试。</p></div>
+    <div class="card"><span class="tag gray">占位</span><h3><span class="mono">159d7fdf</span> · #168</h3><p class="small muted">Go 订阅浏览器设备 OAuth。Windows 版只保留配置占位与校验，未实现完整 Device OAuth 流程；当前 <span class="k">go_keys=[]</span>，不参与免费道。</p></div>
+    <div class="card"><span class="tag warn">未移植</span><h3><span class="mono">0d05fe93</span></h3><p class="small muted">v1.4.8 之后的未发版提交：匿名默认关闭 + 批量代理管理。本次不跟，避免把“匿名默认关闭”带进基线。</p></div>
+  </div>
+  <div class="callout">
+    <strong>本地 Windows 补丁没有丢</strong>
+    <p>WARP 物理网卡绑定、启动失败后台重试、SOCKS5 UDP ASSOCIATE、池/注册器加固、固定代理绑定、配置页保留 <span class="k">prompt_environment</span> 等都在本次移植范围内；上游文件与本地补丁的交叉点在 <span class="mono">upstream.go</span>、<span class="mono">warp.go</span>、<span class="mono">probe.go</span>、<span class="mono">pool.go</span>、<span class="mono">server.go</span>。</p>
+  </div>
+</section>
+
+<section id="free">
+  <h2><span class="num">04</span>免费道工作原理</h2>
+  <p class="muted small">匿名免费道不是“不带 Key 直连”这么简单。网关要同时处理工具名、会话身份、project 身份、出口 /64 和 WARP 池。任一环节错位，上游都会以 429 或空响应表现。</p>
+  <div class="diagram">
+    <svg viewBox="0 0 1000 440" role="img" aria-label="请求链路与 WARP 池架构">
+      <defs>
+        <marker id="a2" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="#8a97ab"/></marker>
+        <marker id="a2b" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="#2457d6"/></marker>
+      </defs>
+      <rect x="20" y="30" width="180" height="88" rx="11" class="svg-box"/>
+      <text x="110" y="61" text-anchor="middle" class="svg-title">OpenCode / SDK</text>
+      <text x="110" y="81" text-anchor="middle" class="svg-sub">OpenAI 兼容客户端</text>
+      <text x="110" y="99" text-anchor="middle" class="svg-sub">:28080</text>
+
+      <rect x="240" y="24" width="210" height="100" rx="11" class="svg-box-accent"/>
+      <text x="345" y="50" text-anchor="middle" class="svg-title">Gateway</text>
+      <text x="345" y="70" text-anchor="middle" class="svg-sub">鉴权 · 模型解析 · 工具名 mcp_</text>
+      <text x="345" y="88" text-anchor="middle" class="svg-sub">title 预判 · 重试所有权</text>
+      <text x="345" y="106" text-anchor="middle" class="svg-sub">响应翻译 / 流式</text>
+
+      <rect x="490" y="30" width="180" height="88" rx="11" class="svg-box"/>
+      <text x="580" y="61" text-anchor="middle" class="svg-title">档位路由</text>
+      <text x="580" y="81" text-anchor="middle" class="svg-sub">zen · go · anonymous</text>
+      <text x="580" y="99" text-anchor="middle" class="svg-sub">free_only 过滤</text>
+
+      <rect x="780" y="30" width="190" height="88" rx="11" class="svg-box-ok"/>
+      <text x="875" y="61" text-anchor="middle" class="svg-title">opencode.ai</text>
+      <text x="875" y="81" text-anchor="middle" class="svg-sub">models / chat</text>
+      <text x="875" y="99" text-anchor="middle" class="svg-sub">免费层按出口记账</text>
+
+      <path d="M200 74 H240" class="svg-arrow" marker-end="url(#a2)"/>
+      <path d="M450 74 H490" class="svg-arrow" marker-end="url(#a2)"/>
+      <path d="M670 74 H780" class="svg-arrow" marker-end="url(#a2b)"/>
+
+      <rect x="490" y="178" width="180" height="88" rx="11" class="svg-box-accent"/>
+      <text x="580" y="209" text-anchor="middle" class="svg-title">匿名免费道</text>
+      <text x="580" y="229" text-anchor="middle" class="svg-sub">SessionGuard</text>
+      <text x="580" y="247" text-anchor="middle" class="svg-sub">session / project 轮换</text>
+
+      <rect x="250" y="178" width="200" height="88" rx="11" class="svg-box"/>
+      <text x="350" y="209" text-anchor="middle" class="svg-title">WARP 池</text>
+      <text x="350" y="229" text-anchor="middle" class="svg-sub">size 32 · preload 12</text>
+      <text x="350" y="247" text-anchor="middle" class="svg-sub">/64 去重 · 失败退役</text>
+
+      <rect x="20" y="178" width="190" height="88" rx="11" class="svg-box-ok"/>
+      <text x="115" y="209" text-anchor="middle" class="svg-title">Cloudflare WARP</text>
+      <text x="115" y="229" text-anchor="middle" class="svg-sub">每个出口一个 IPv6 /64</text>
+      <text x="115" y="247" text-anchor="middle" class="svg-sub">netstack，无网卡/路由</text>
+
+      <rect x="250" y="322" width="200" height="80" rx="11" class="svg-box-warn"/>
+      <text x="350" y="350" text-anchor="middle" class="svg-title">Clash 7897</text>
+      <text x="350" y="370" text-anchor="middle" class="svg-sub">TCP 注册 · UDP ASSOCIATE</text>
+      <text x="350" y="388" text-anchor="middle" class="svg-sub">socks5://127.0.0.1:7897</text>
+
+      <path d="M580 118 V178" class="svg-arrow" marker-end="url(#a2b)"/>
+      <path d="M490 222 H450" class="svg-arrow" marker-end="url(#a2)"/>
+      <path d="M250 222 H210" class="svg-arrow" marker-end="url(#a2)"/>
+      <path d="M115 266 V322 H250" class="svg-arrow-dash" marker-end="url(#a2)"/>
+      <path d="M450 362 H350" class="svg-arrow-dash" marker-end="url(#a2)"/>
+      <path d="M350 322 V266" class="svg-arrow-dash" marker-end="url(#a2)"/>
+      <path d="M210 222 H875 V118" class="svg-arrow" marker-end="url(#a2b)"/>
+      <text x="620" y="270" class="svg-label">出口出站：目标看到 WARP IPv6，不是 7897 节点公网 IP</text>
+    </svg>
+    <div class="caption"><b>图 2</b> 请求链路。注册 HTTPS 走 <span class="mono">proxies[0]</span>；WireGuard 外层 UDP 走 <span class="mono">socks_udp</span>；免费道每个请求绑定一个出口，429 时按会话/项目/出口顺序轮换。</div>
+  </div>
+  <div class="grid g2" style="margin-top:12px">
+    <div class="card">
+      <h3>请求生命周期（匿名道）</h3>
+      <ol class="small" style="margin:6px 0 0;padding-left:20px;color:#4b5668">
+        <li>客户端带 <span class="k">sk-win-local-test</span> 调 <span class="k">/v1/chat/completions</span>；网关先解析模型是否在免费名单。</li>
+        <li>工具定义统一改名为 <span class="k">mcp_*</span>；legacy <span class="k">functions</span> 只改名一次，避免二次前缀。</li>
+        <li>title 请求预判：最多 1 次尝试，429/传输失败本地合成回退，不再拖垮主请求。</li>
+        <li>匿名道取一个 WARP 出口，按会话解析身份；同一会话固定出口，避免“新出口 + 旧会话”立即 429。</li>
+        <li>成功则记录出口；失败按图 1 轮换，保留最近上游 HTTP 错误与响应所有权。</li>
+      </ol>
+    </div>
+    <div class="card">
+      <h3>免费配额为什么这么容易 429</h3>
+      <ul class="small" style="margin:6px 0 0;padding-left:20px;color:#4b5668">
+        <li>计量单位是 <b>(project, 出口 /64)</b>，不是单纯 IP；只换出口不换 project，会在新出口重放同一个 429。</li>
+        <li>一个成功请求会消耗一个出口；池子补充速度约 30–40 秒/个，突发流量会先打穿现有出口。</li>
+        <li>429 后出口默认退役 120 秒（本次配置）；`cooling` 是历史记录，`active=0` 才是当前无出口可用。</li>
+        <li>Clash 节点掉线时 WARP 握手 <span class="k">rx=0</span>，免费道整体不可用；这不是额度问题，后台会按 15s→30s→1m→2m→5m 重试。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="evidence">
+  <h2><span class="num">05</span>验证证据</h2>
+  <p class="muted small">下面只列实际执行过的命令与回显摘要。标注“同日同代码”的探针在版本号注入前构建，运行代码与 v1.4.8-win.1 一致；部署后极简探针为最终二进制。</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>检查</th><th>命令 / 场景</th><th>结果</th><th>状态</th></tr></thead>
+      <tbody>
+        <tr><td>构建</td><td><span class="mono">go build -trimpath -ldflags "-X main.version=v1.4.8-win.1" -o opencode2api.exe ./cmd/opencode2api</span></td><td>BUILD_OK；19,871,232 B；SHA-256 BAB8F334…</td><td><span class="tag ok">已验证</span></td></tr>
+        <tr><td>静态检查</td><td><span class="mono">go vet ./...</span></td><td>exit=0</td><td><span class="tag ok">已验证</span></td></tr>
+        <tr><td>单元测试</td><td><span class="mono">go test ./... -count=1</span></td><td>gateway / protocol / warp 全部 ok；TEST_EXIT=0</td><td><span class="tag ok">已验证</span></td></tr>
+        <tr><td>交叉构建</td><td><span class="mono">GOOS=linux / darwin / windows</span></td><td>三次 exit=0</td><td><span class="tag ok">已验证</span></td></tr>
+        <tr><td>冒烟</td><td>独立配置启动 :28099，<span class="mono">/healthz</span></td><td>version=v1.4.8-win.1；status=ok；models 86/12</td><td><span class="tag ok">已验证</span></td></tr>
+        <tr><td>部署健康</td><td><span class="mono">curl --noproxy "*" http://127.0.0.1:28080/healthz</span></td><td>status=ok；version=v1.4.8-win.1；warp ready 32/12/active 5</td><td><span class="tag ok">已验证</span></td></tr>
+        <tr><td>极简免费请求</td><td>deepseek-v4.1-flash-free，无 tools，非流式</td><td>200 / 29.1s；content=PONG；usage 5779</td><td><span class="tag ok">已验证</span></td></tr>
+        <tr><td>带 tools 非流式</td><td>bash 工具 + system prompt，JSON</td><td>200 / 35.1s；content=PONG；usage 5859</td><td><span class="tag ok">已验证</span></td></tr>
+        <tr><td>带 tools 流式</td><td>同一请求 + <span class="mono">stream=true</span></td><td>200 / 8.0s；SSE role → PONG → stop</td><td><span class="tag ok">已验证</span></td></tr>
+        <tr><td>反证：池子只有 1 个出口</td><td>同一带 tools 流式请求</td><td>429 / 96.0s；Free usage limit</td><td><span class="tag err">已验证</span></td></tr>
+        <tr><td>WARP 池回血</td><td>重置状态后每 10 秒采样 healthz</td><td>t=0/40/80/120/160/200s：active 0/0/1/2/4/4；cooling 4/3/2/2/2/2</td><td><span class="tag ok">已验证</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="grid g2" style="margin-top:12px">
+    <div class="card">
+      <h3>延迟对比（免费道）</h3>
+      <div class="bars">
+        <div class="bar-row"><span class="lbl">极简 PONG（部署后）</span><div class="track"><i style="--w:30.3%;--c:var(--ok)"></i></div><b>29.1s</b></div>
+        <div class="bar-row"><span class="lbl">带 tools 非流式</span><div class="track"><i style="--w:36.6%;--c:var(--accent)"></i></div><b>35.1s</b></div>
+        <div class="bar-row"><span class="lbl">带 tools 流式</span><div class="track"><i style="--w:8.3%;--c:var(--ok)"></i></div><b>8.0s</b></div>
+        <div class="bar-row"><span class="lbl">单出口失败对照</span><div class="track"><i style="--w:100%;--c:var(--err)"></i></div><b>96.0s</b></div>
+      </div>
+      <div class="legend"><span><i class="ok"></i>成功</span><span><i></i>成功（非流式）</span><span><i class="warn"></i>失败对照</span></div>
+      <p class="caption">同一模型、同一台机器、同一代码；差异来自请求形状和池子状态，不是流式参数 bug。</p>
+    </div>
+    <div class="diagram" style="padding:10px 12px">
+      <svg viewBox="0 0 900 280" role="img" aria-label="WARP 池回血曲线">
+        <defs>
+          <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#2457d6" stop-opacity=".18"/>
+            <stop offset="1" stop-color="#2457d6" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <g stroke="#e4e9f2" stroke-width="1">
+          <line x1="60" y1="230" x2="840" y2="230"/><line x1="60" y1="150" x2="840" y2="150"/><line x1="60" y1="70" x2="840" y2="70"/>
+        </g>
+        <g fill="#7a8699" font-size="10.5" font-family="Segoe UI,Noto Sans SC,sans-serif">
+          <text x="36" y="234">0</text><text x="36" y="154">2</text><text x="36" y="74">4</text>
+          <text x="58" y="252">0s</text><text x="202" y="252">40s</text><text x="358" y="252">80s</text><text x="514" y="252">120s</text><text x="670" y="252">160s</text><text x="810" y="252">200s</text>
+        </g>
+        <path d="M60 230 L60 230 L216 230 L372 190 L528 150 L684 70 L840 70 L840 230 Z" fill="url(#area)"/>
+        <polyline points="60,230 216,230 372,190 528,150 684,70 840,70" fill="none" stroke="#2457d6" stroke-width="2.4" stroke-linejoin="round"/>
+        <polyline points="60,70 216,110 372,150 528,150 684,150 840,150" fill="none" stroke="#a15c07" stroke-width="2" stroke-dasharray="6 4" stroke-linejoin="round"/>
+        <g fill="#2457d6"><circle cx="60" cy="230" r="4"/><circle cx="216" cy="230" r="4"/><circle cx="372" cy="190" r="4"/><circle cx="528" cy="150" r="4"/><circle cx="684" cy="70" r="4"/><circle cx="840" cy="70" r="4"/></g>
+        <g fill="#a15c07"><circle cx="60" cy="70" r="4"/><circle cx="216" cy="110" r="4"/><circle cx="372" cy="150" r="4"/><circle cx="528" cy="150" r="4"/><circle cx="684" cy="150" r="4"/><circle cx="840" cy="150" r="4"/></g>
+        <text x="700" y="56" fill="#2457d6" font-size="11" font-weight="700" font-family="Segoe UI,Noto Sans SC,sans-serif">active</text>
+        <text x="700" y="132" fill="#a15c07" font-size="11" font-weight="700" font-family="Segoe UI,Noto Sans SC,sans-serif">cooling</text>
+      </svg>
+      <div class="caption"><b>图 3</b> 2026-11-16 22:30 重置状态后的池子回血；到 200s 时 active=4、cooling=2，随后同一流式请求 200/8.0s。</div>
+    </div>
+  </div>
+</section>
+
+<section id="config">
+  <h2><span class="num">06</span>当前配置基线</h2>
+  <p class="muted small">只列影响免费道与运维的字段。完整字段说明见 <span class="mono">doc/02-配置参考.md</span>；密钥值不写入画布。</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>字段</th><th>当前值</th><th>作用 / 备注</th></tr></thead>
+      <tbody>
+        <tr><td><span class="mono">listen</span></td><td><span class="mono">0.0.0.0:28080</span></td><td>API 监听；局域网访问需防火墙放行</td></tr>
+        <tr><td><span class="mono">webui.listen</span></td><td><span class="mono">127.0.0.1:28081</span></td><td>管理界面只监听回环</td></tr>
+        <tr><td><span class="mono">server_keys</span></td><td>3 个（含 <span class="mono">sk-win-local-test</span>）</td><td>本地客户端鉴权；不是上游 Key</td></tr>
+        <tr><td><span class="mono">zen_keys</span> / <span class="mono">go_keys</span></td><td><span class="mono">[]</span> / <span class="mono">[]</span></td><td>当前不依赖账号 Key，只跑匿名免费道</td></tr>
+        <tr><td><span class="mono">anonymous</span></td><td><span class="mono">true</span></td><td>允许无上游 Key 的免费档</td></tr>
+        <tr><td><span class="mono">models.free_only</span></td><td><span class="mono">true</span></td><td>付费模型返回 400/503，不误走付费档</td></tr>
+        <tr><td><span class="mono">prefer</span> / <span class="mono">reasoning.effort</span></td><td><span class="mono">go</span> / <span class="mono">max</span></td><td>当前没有 go Key；reasoning 透传给支持的模型</td></tr>
+        <tr><td><span class="mono">retry</span></td><td><span class="mono">max_attempts=60</span>, <span class="mono">timeout=300s</span></td><td>免费道轮换需要更多尝试；超时覆盖长上下文</td></tr>
+        <tr><td><span class="mono">warp</span></td><td><span class="mono">enabled=true</span>, <span class="mono">pool_size=32</span>, <span class="mono">stack=ipv6</span>, <span class="mono">socks_udp=socks5://127.0.0.1:7897</span></td><td>池上限 32，preload 上限 12；UDP 走 Clash SOCKS5</td></tr>
+        <tr><td><span class="mono">proxies</span></td><td><span class="mono">["socks5://127.0.0.1:7897"]</span></td><td>WARP 注册 HTTPS 与普通代理出站</td></tr>
+        <tr><td><span class="mono">performance</span></td><td><span class="mono">max_anonymous_exits=32</span>, <span class="mono">free_tier_block_seconds=120</span>, <span class="mono">attempt_timeout=120s</span>, <span class="mono">connect_timeout=10s</span></td><td>本次调容的核心三项；block 默认 900s，这里缩短到 120s</td></tr>
+        <tr><td><span class="mono">warp-state</span></td><td>持久化在 <span class="mono">config.json.warp-state.json</span></td><td>记录已烧 /64；排障时可备份后删除重建</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout warn">
+    <strong>不要照抄旧文档里的 10808 / pool 12</strong>
+    <p>旧版 README 记录的是 v2rayN 10808、<span class="k">pool_size=12</span>、<span class="k">tun=true</span>。当前基线已切到 Clash 7897、<span class="k">pool_size=32</span>，配置里没有 <span class="k">tun</span> 字段。升级或换机时以 <span class="mono">config.json</span> 和本表为准。</p>
+  </div>
+</section>
+
+<section id="deploy">
+  <h2><span class="num">07</span>部署与回滚</h2>
+  <p class="muted small">当前发布包在 <span class="mono">release/v1.4.8-win.1/</span>，压缩包为 <span class="mono">release/opencode2api-v1.4.8-win.1.zip</span>。部署前先备份正在运行的 exe；回滚只需换回备份并重启。</p>
+  <h3>构建</h3>
+  <pre><code>$env:PATH = 'C:\Go\go\bin;' + $env:PATH
+$env:CGO_ENABLED = '0'
+go build -trimpath -ldflags "-X main.version=v1.4.8-win.1" -o opencode2api.exe ./cmd/opencode2api
+go vet ./...
+go test ./... -count=1</code></pre>
+  <h3>部署（保留旧 exe）</h3>
+  <pre><code>cd 'D:\Project\Openchamber\Token\opencode\oc2-win'
+$ts = Get-Date -Format 'yyyyMMdd-HHmmss'
+Copy-Item opencode2api.exe "opencode2api.exe.bak-$ts-pre-v1.4.8-win.1" -Force
+Get-Process opencode2api -ErrorAction SilentlyContinue | Stop-Process -Force
+Copy-Item 'opencode2api-v1.4.8-win.1.exe' 'opencode2api.exe' -Force
+Start-Process -FilePath "$PWD\opencode2api.exe" -ArgumentList '-config',"$PWD\config.json" -WorkingDirectory $PWD
+if (-not (Get-Process opencode2api -ErrorAction SilentlyContinue)) { Write-Output 'START_FAILED' }
+for ($i=0; $i -lt 40; $i++) {
+  Start-Sleep 3
+  $h = curl.exe -sS --noproxy "*" -m 5 http://127.0.0.1:28080/healthz 2>$null | ConvertFrom-Json
+  if ($h.version -eq 'v1.4.8-win.1' -and $h.status -eq 'ok') { Write-Output 'DEPLOY_OK'; break }
+}</code></pre>
+  <h3>回滚</h3>
+  <pre><code>cd 'D:\Project\Openchamber\Token\opencode\oc2-win'
+Get-Process opencode2api -ErrorAction SilentlyContinue | Stop-Process -Force
+Copy-Item 'opencode2api.exe.bak-20261116-230522-pre-v1.4.8-win.1' 'opencode2api.exe' -Force
+Start-Process -FilePath "$PWD\opencode2api.exe" -ArgumentList '-config',"$PWD\config.json" -WorkingDirectory $PWD</code></pre>
+  <div class="grid g3" style="margin-top:12px">
+    <div class="card"><span class="tag ok">发布包</span><h3>release/v1.4.8-win.1</h3><p class="small muted">exe、README-WIN、CHANGELOG、config.example、RELEASE-NOTES、SHA256SUMS。压缩包 10.4 MB。</p></div>
+    <div class="card"><span class="tag info">配置备份</span><h3>config.json.bak-20261116-222128</h3><p class="small muted">调容前备份（pool 16 / max exits 0 / block 0）。回滚配置时先停进程再覆盖。</p></div>
+    <div class="card"><span class="tag info">状态备份</span><h3>config.json.warp-state.json.bak-20261116-223051</h3><p class="small muted">重置 WARP 前的 spent 出口记录；一般不需要恢复，恢复会把已烧 /64 带回来。</p></div>
+  </div>
+</section>
+
+<section id="maintain">
+  <h2><span class="num">08</span>维护与升级（下次版本照这个做）</h2>
+  <p class="muted small">目标不是“能编译”，而是“基线可对比、证据可复现、回滚有文件名”。每一步都留下产物或命令回显。</p>
+  <div class="checks">
+    <div class="check"><span class="mark">1</span><div><b>确认上游发布点</b><small><span class="mono">git ls-remote --tags upstream</span> 或上游 Releases；不要拿未发版提交当基线。</small></div></div>
+    <div class="check"><span class="mark">2</span><div><b>同步并读差异</b><small><span class="mono">git fetch upstream main && git log --oneline HEAD..upstream/main</span>；逐条记录提交号与影响面。</small></div></div>
+    <div class="check"><span class="mark">3</span><div><b>保住本地 WARP 补丁</b><small>重点检查 <span class="mono">upstream.go</span>、<span class="mono">warp.go</span>、<span class="mono">probe.go</span>、<span class="mono">pool.go</span>、<span class="mono">config.go</span>、<span class="mono">admin/server.go</span>。</small></div></div>
+    <div class="check"><span class="mark">4</span><div><b>构建新版本号</b><small>用 <span class="mono">-X main.version=vX.Y.Z-win.N</span>；构建后记录 SHA-256 和字节数。</small></div></div>
+    <div class="check"><span class="mark">5</span><div><b>全套验证</b><small><span class="mono">go vet ./...</span>、<span class="mono">go test ./... -count=1</span>、三平台交叉构建、独立端口冒烟。</small></div></div>
+    <div class="check"><span class="mark">6</span><div><b>免费道三类探针</b><small>极简、带 tools 非流式、带 tools 流式；同时记录 <span class="mono">/healthz</span> 的 warp active/cooling。</small></div></div>
+    <div class="check"><span class="mark">7</span><div><b>更新文档与发布包</b><small><span class="mono">CHANGELOG.md</span>、<span class="mono">BASELINE.md</span>、<span class="mono">doc/12-版本基线-*.md</span>、<span class="mono">release/</span> 与 <span class="mono">SHA256SUMS.txt</span>。</small></div></div>
+    <div class="check"><span class="mark">8</span><div><b>更新画布</b><small>复制本 HTML 改版本/数据/时间线，重新发布；保留旧画布作为历史。</small></div></div>
+    <div class="check"><span class="mark">9</span><div><b>提交前筛选</b><small>不要 <span class="mono">git add -A</span>；排除 <span class="mono">*.py</span>、<span class="mono">*.out</span>、<span class="mono">probe-run/</span>、<span class="mono">*.exe</span>、<span class="mono">.bak-*</span> 和临时 JSON。</small></div></div>
+    <div class="check"><span class="mark w">!</span><div><b>未发版不跟</b><small>当前 <span class="mono">0d05fe93</span> 的匿名默认关闭会改变免费道行为，未发版前不合并。</small></div></div>
+  </div>
+  <h3>升级命令骨架</h3>
+  <pre><code>cd 'D:\Project\Openchamber\Token\opencode\oc2-win'
+git fetch upstream main
+git log --oneline --decorate HEAD..upstream/main
+# 逐条评估后合并；保留本地 WARP 补丁
+git merge upstream/main
+$env:PATH = 'C:\Go\go\bin;' + $env:PATH
+$env:CGO_ENABLED = '0'
+go build -trimpath -ldflags "-X main.version=vNEXT" -o opencode2api-vNEXT.exe ./cmd/opencode2api
+go vet ./...
+go test ./... -count=1</code></pre>
+</section>
+
+<section id="trouble">
+  <h2><span class="num">09</span>排障矩阵</h2>
+  <p class="muted small">先看现象，再做一条判断，不要同时改三个参数。每次只改一个变量，留下前后 healthz 和日志。</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>现象</th><th>先查什么</th><th>处理</th></tr></thead>
+      <tbody>
+        <tr><td>429 <span class="mono">Free usage limit reached</span></td><td><span class="mono">/healthz</span> 的 <span class="mono">warp.active</span> / <span class="mono">cooling</span>；请求是否带 tools；二进制 version</td><td>active=0 等 2–4 分钟；持续无出口则备份并删除 <span class="mono">config.json.warp-state.json</span> 后重启；确认 version=v1.4.8-win.1</td></tr>
+        <tr><td>带 tools 空响应 / 超时</td><td>二进制是否仍含 <span class="mono">clint_</span>；日志是否出现 429；healthz warp</td><td>换 v1.4.8-win.1；检查工具名是否 <span class="mono">mcp_</span>；不要只改超时</td></tr>
+        <tr><td><span class="mono">warp: unavailable</span> / <span class="mono">active=0</span></td><td>Clash 7897 TCP 与 UDP 是否可用；<span class="mono">api.cloudflareclient.com</span> 是否可注册；日志 <span class="mono">handshake=never rx=0</span></td><td>恢复 Clash 节点；等后台重试；必要时重启网关；不要反复重置状态文件</td></tr>
+        <tr><td><span class="mono">ready:false</span> / <span class="mono">status:degraded</span></td><td><span class="mono">issues</span> 数组：<span class="mono">model_catalog_stale</span>、<span class="mono">no_healthy_proxies</span>、<span class="mono">free_tier_lane_paused</span></td><td>等模型刷新；检查代理；熔断则等冷却或重启</td></tr>
+        <tr><td>WebUI 401</td><td>密码是否被改；<span class="mono">password_hash</span> 是否匹配</td><td>用明文 <span class="mono">password</span> 重置，重启后自动转 Argon2id</td></tr>
+        <tr><td>端口被占用</td><td><span class="mono">Get-NetTCPConnection -LocalPort 28080,28081 -State Listen</span></td><td>停旧进程；不要同时起两个实例</td></tr>
+        <tr><td>付费模型 400/503</td><td><span class="mono">models.free_only=true</span></td><td>免费道只发免费模型；要付费模型必须加 Key 并改配置</td></tr>
+        <tr><td>WARP 一直 <span class="mono">cooling</span> 很多</td><td>是否刚做过大量探针；<span class="mono">active</span> 是否仍大于 0</td><td>cooling 是历史记录；active>0 仍可用。全部烧光才重置状态</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>三条常用命令</h3>
+  <pre><code># 1. 看进程版本与池状态
+curl.exe -sS --noproxy "*" http://127.0.0.1:28080/healthz
+
+# 2. 看最近 WARP / 429 事件
+Get-Content logs\run-v1.4.8-win.1-*.log -Tail 80 | Select-String 'WARP|429|Free usage|retry|fallback'
+
+# 3. 备份并重置 WARP 状态（会重新注册出口）
+Copy-Item config.json.warp-state.json "config.json.warp-state.json.bak-$(Get-Date -Format yyyyMMdd-HHmmss)" -Force
+Remove-Item config.json.warp-state.json -Force
+Get-Process opencode2api -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Process -FilePath "$PWD\opencode2api.exe" -ArgumentList '-config',"$PWD\config.json" -WorkingDirectory $PWD</code></pre>
+</section>
+
+<section id="files">
+  <h2><span class="num">10</span>变更文件索引</h2>
+  <p class="muted small">按“上游对齐 / 本地 WARP / 配置与管理 / 文档与测试”分组。带 * 的文件在基线时仍未跟踪；提交前逐项确认，不要整目录加入。</p>
+  <div class="grid g2">
+    <div class="card">
+      <h3>上游 v1.4.8 对齐</h3>
+      <ul class="file-list">
+        <li>internal/gateway/title.go *</li>
+        <li>internal/gateway/abuse.go</li>
+        <li>internal/gateway/upstream.go</li>
+        <li>internal/gateway/warp.go</li>
+        <li>internal/gateway/probe.go</li>
+        <li>internal/gateway/toolshape.go</li>
+        <li>internal/gateway/pool.go</li>
+        <li>internal/gateway/gateway.go</li>
+        <li>internal/protocol/tools.go</li>
+        <li>internal/protocol/request.go</li>
+        <li>internal/protocol/response.go</li>
+        <li>internal/telemetry/http.go</li>
+        <li>internal/gateway/opencode_prompt.go</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>配置、管理与 WARP</h3>
+      <ul class="file-list">
+        <li>internal/config/config.go</li>
+        <li>internal/goauth/connection.go *</li>
+        <li>internal/admin/server.go</li>
+        <li>internal/admin/warp.go *</li>
+        <li>internal/warp/pool.go</li>
+        <li>internal/warp/blacklist.go *</li>
+        <li>internal/warp/blacklist_test.go *</li>
+        <li>internal/warp/penalty_test.go</li>
+        <li>webui/js/pages/config.js</li>
+        <li>webui/js/pages/warp-blacklist.js *</li>
+        <li>webui/index.html</li>
+        <li>webui/js/main.js</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>文档与发布</h3>
+      <ul class="file-list">
+        <li>README-WIN.md</li>
+        <li>README.md / README.zh-CN.md</li>
+        <li>README.it.md / README.vi.md</li>
+        <li>doc/README.md</li>
+        <li>doc/12-版本基线-v1.4.8-win.1.md *</li>
+        <li>BASELINE.md</li>
+        <li>CHANGELOG.md *</li>
+        <li>config.example.json</li>
+        <li>.gitignore</li>
+        <li>release/v1.4.8-win.1/ *</li>
+        <li>release/opencode2api-v1.4.8-win.1.zip *</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>测试与工具</h3>
+      <ul class="file-list">
+        <li>internal/gateway/sessions_test.go</li>
+        <li>internal/gateway/transport_error_test.go *</li>
+        <li>internal/gateway/zz_title_check_test.go *</li>
+        <li>internal/gateway/zz_dump_probe_test.go *（待确认是否保留）</li>
+        <li>cmd/warpchat/ *</li>
+        <li>cmd/warpprobe/</li>
+        <li>docs/warp-farm-linux.md *</li>
+        <li>start-background.ps1</li>
+      </ul>
+    </div>
+  </div>
+  <div class="callout warn">
+    <strong>仓库工作区故意很脏</strong>
+    <p>还有调试脚本（<span class="mono">*.py</span>）、抓包输出（<span class="mono">*.out</span>）、临时 JSON、<span class="mono">probe-run/</span> 和旧 exe 备份。提交时只按上面的清单筛选；不要 <span class="mono">git checkout/reset/clean</span>，会丢掉本地正在维护的 WARP 补丁。</p>
+  </div>
+</section>
+
+<div class="footer">
+  <span>opencode2api-win 基线 · 2026-11-17 · v1.4.8-win.1</span>
+  <span>源文件：doc/canvas/opencode2api-win-2026-11-17.html · 维护入口：doc/12 · CHANGELOG · BASELINE</span>
+</div>
+</main>
+</div>
+<a class="to-top" href="#" title="回到顶部">↑</a>
+</body>
+</html>

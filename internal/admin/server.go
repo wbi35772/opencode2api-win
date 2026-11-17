@@ -68,6 +68,10 @@ func (a *Server) Handler() http.Handler {
 	mux.Handle("POST /api/models/restore", a.authenticate(a.csrf(http.HandlerFunc(a.handleRestoreModel))))
 	mux.Handle("POST /api/models/manual", a.authenticate(a.csrf(http.HandlerFunc(a.handleManualModel))))
 	mux.Handle("POST /api/models/probe", a.authenticate(a.csrf(http.HandlerFunc(a.handleProbeModels))))
+	mux.Handle("GET /api/warp/blacklist", a.authenticate(http.HandlerFunc(a.handleWarpBlacklist)))
+	mux.Handle("POST /api/warp/blacklist/ban", a.authenticate(a.csrf(http.HandlerFunc(a.handleWarpBan))))
+	mux.Handle("POST /api/warp/blacklist/release", a.authenticate(a.csrf(http.HandlerFunc(a.handleWarpRelease))))
+	mux.Handle("POST /api/warp/blacklist/reload", a.authenticate(a.csrf(http.HandlerFunc(a.handleWarpReload))))
 	mux.Handle("GET /api/rotation", a.authenticate(http.HandlerFunc(a.handleRotation)))
 	mux.Handle("PUT /api/rotation", a.authenticate(a.csrf(http.HandlerFunc(a.handleSaveRotation))))
 	mux.Handle("POST /api/rotation/current", a.authenticate(a.csrf(http.HandlerFunc(a.handleSelectRotation))))
@@ -144,6 +148,7 @@ type ConfigView struct {
 	Warp        config.WarpConfig        `json:"warp"`
 	Proxies     []SecretView             `json:"proxies"`
 	ProxyFile   string                   `json:"proxyfile"`
+	ProxyBindings map[string]string      `json:"proxy_bindings,omitempty"`
 	Upstream    config.UpstreamConfig    `json:"upstream"`
 	Retry       config.RetryConfig       `json:"retry"`
 	Models      config.ModelsConfig      `json:"models"`
@@ -192,6 +197,7 @@ type ConfigUpdate struct {
 	Warp        config.WarpConfig        `json:"warp"`
 	Proxies     []SecretInput            `json:"proxies"`
 	ProxyFile   string                   `json:"proxyfile"`
+	ProxyBindings map[string]string      `json:"proxy_bindings,omitempty"`
 	Upstream    config.UpstreamConfig    `json:"upstream"`
 	Retry       config.RetryConfig       `json:"retry"`
 	Models      config.ModelsConfig      `json:"models"`
@@ -211,9 +217,10 @@ func (a *Server) handleGetConfig(w http.ResponseWriter, _ *http.Request) {
 }
 
 // handlePutConfig resolves the submitted secrets against the current ones,
-// keeps what the update omits (rotation, server key metadata, the WebUI
-// username and password hash, and reasoning when the field is absent), and
-// hands the result to the runtime, which validates, applies and persists it.
+// keeps what the update omits (rotation, server key metadata, the Go
+// subscription, the WebUI username and password hash, and reasoning and proxy
+// bindings when the fields are absent), and hands the result to the runtime,
+// which validates, applies and persists it.
 func (a *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	var update ConfigUpdate
 	if err := decodeAdminJSON(w, r, &update); err != nil {
@@ -245,15 +252,35 @@ func (a *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	if update.Reasoning != nil {
 		reasoning = *update.Reasoning
 	}
+	proxyBindings := current.ProxyBindings
+	if update.ProxyBindings != nil {
+		proxyBindings = update.ProxyBindings
+	}
 	candidate := config.Config{
 		ServerKeyMetadata: current.ServerKeyMetadata,
 		Rotation:          current.Rotation,
+		GoSubscription:    current.GoSubscription,
 		Listen:            update.Listen, ServerKeys: serverKeys, ZenKeys: zenKeys, GoKeys: goKeys, Anonymous: update.Anonymous, Warp: update.Warp, Proxies: proxies, ProxyFile: update.ProxyFile,
-		Upstream: update.Upstream, Retry: update.Retry, Models: update.Models, Performance: update.Performance, Logging: update.Logging, Prefer: update.Prefer,
+		ProxyBindings: proxyBindings,
+		Upstream:      update.Upstream, Retry: update.Retry, Models: update.Models, Performance: update.Performance, Logging: update.Logging, Prefer: update.Prefer,
 		Reasoning: reasoning,
 		WebUI:     config.WebUIConfig{Enabled: update.WebUI.Enabled, Listen: update.WebUI.Listen, Username: current.WebUI.Username, PasswordHash: current.WebUI.PasswordHash, SessionTTLMinutes: update.WebUI.SessionTTLMinutes},
 	}
-	result, err := a.manager.Apply(candidate, true)
+	result, err := a.manager.Update(func(latest *config.Config) error {
+		candidate.GoSubscription = latest.GoSubscription
+		candidate.ServerKeyMetadata = latest.ServerKeyMetadata
+		candidate.Rotation = latest.Rotation
+		candidate.WebUI.Username = latest.WebUI.Username
+		candidate.WebUI.PasswordHash = latest.WebUI.PasswordHash
+		if update.Reasoning == nil {
+			candidate.Reasoning = latest.Reasoning
+		}
+		if update.ProxyBindings == nil {
+			candidate.ProxyBindings = latest.ProxyBindings
+		}
+		*latest = candidate
+		return nil
+	})
 	if err != nil {
 		a.logger.Warn("configuration update rejected", "component", "config", "event", "config_rejected", "error", err)
 		writeAdminError(w, http.StatusBadRequest, "configuration_rejected", err.Error())
@@ -391,7 +418,7 @@ func (a *Server) configView() ConfigView {
 	effective, restart := a.manager.RestartStatus()
 	return ConfigView{
 		Listen: cfg.Listen, ServerKeys: maskSecrets(cfg.ServerKeys, false), ZenKeys: maskSecrets(cfg.ZenKeys, false), GoKeys: maskSecrets(cfg.GoKeys, false), Anonymous: cfg.Anonymous, Warp: cfg.Warp,
-		Proxies: maskSecrets(cfg.Proxies, true), ProxyFile: cfg.ProxyFile, Upstream: cfg.Upstream, Retry: cfg.Retry, Models: cfg.Models,
+		Proxies: maskSecrets(cfg.Proxies, true), ProxyFile: cfg.ProxyFile, ProxyBindings: cfg.ProxyBindings, Upstream: cfg.Upstream, Retry: cfg.Retry, Models: cfg.Models,
 		Performance: cfg.Performance, Logging: cfg.Logging, Prefer: cfg.Prefer, Reasoning: cfg.Reasoning,
 		WebUI:     WebUIView{Enabled: cfg.WebUI.Enabled, Listen: cfg.WebUI.Listen, Username: cfg.WebUI.Username, SessionTTLMinutes: cfg.WebUI.SessionTTLMinutes},
 		Effective: EffectiveView{Listen: effective.API, WebUIListen: effective.WebUI, WebUIEnabled: effective.WebUIEnabled},

@@ -320,3 +320,23 @@ func RandomProjectID() string {
 	}
 	return hex.EncodeToString(buf)
 }
+
+// CanonicalProjectID derives the canonical upstream project id for one
+// generation of a conversation's free-tier project bucket. The free tier
+// ledges quota per project id and egress together, so a conversation whose
+// bucket is spent keeps failing on every fresh session and every fresh exit.
+// Re-encoding the conversation's project with its burn generation mints a
+// stable replacement bucket the upstream accepts, while generation zero keeps
+// the client's own project verbatim for as long as it is not spent. The
+// output stays in the official CLI's 40-hex git-root shape; the value the
+// gateway sends upstream is passed through unchanged by the project renderer.
+// The encoding is salted with bootNonce like the session: a restart yields a
+// fresh bucket instead of resuming whatever the last run was charged for.
+func CanonicalProjectID(signal string) string {
+	hasher := sha256.New()
+	hasher.Write([]byte("prj\x00"))
+	hasher.Write(bootNonce)
+	hasher.Write([]byte{0})
+	hasher.Write([]byte(signal))
+	return hex.EncodeToString(hasher.Sum(nil)[:20])
+}

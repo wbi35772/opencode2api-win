@@ -49,7 +49,7 @@ $p.Id | Set-Content -LiteralPath $pidFile
 $api = "http://127.0.0.1:$port"
 $started = $false
 $ready = $false
-for ($i = 0; $i -lt 15; $i++) {
+for ($i = 0; $i -lt 60; $i++) {
     Start-Sleep -Seconds 1
     if (-not (Get-Process -Id $p.Id -ErrorAction SilentlyContinue)) { break }
     $body = $null
