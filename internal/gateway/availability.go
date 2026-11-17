@@ -107,6 +107,10 @@ func (m *RuntimeController) RequestAvailabilitySweep() {
 // control whose next check is due. A result is recorded only while the
 // runtime that ran the probe is still current.
 func (m *RuntimeController) checkFreeModels(ctx context.Context) {
+	r := m.current.Load()
+	if r == nil || !r.gateway.cfg.Models.ActiveProbes {
+		return
+	}
 	for _, item := range m.AvailabilitySnapshot() {
 		if ctx.Err() != nil {
 			return

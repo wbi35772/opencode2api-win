@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"opencode2api/internal/config"
@@ -94,6 +95,9 @@ type Gateway struct {
 	// freeTierBlock is how long an exit the free tier flagged stays out of the
 	// anonymous cursor. Zero uses freeTierBlockTTL.
 	freeTierBlock time.Duration
+	// refreshMu prevents overlapping catalog refreshes across concurrent or
+	// scheduled callers.
+	refreshMu sync.Mutex
 	// sessions moves a conversation to a fresh upstream session identity when
 	// the free tier reports that session's quota as spent. The quota follows
 	// the session, so rotating exits alone cannot recover it.

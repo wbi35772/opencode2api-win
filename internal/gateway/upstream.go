@@ -1212,6 +1212,13 @@ func (g *Gateway) recordUpstreamAttempt(ctx context.Context, route models.Route,
 		leg += ":" + strconv.FormatInt(max(duration.Milliseconds(), 0), 10) + "ms"
 		meta.Legs = append(meta.Legs, leg)
 	}
+	if !isDiagnosticRequest(ctx) && g.availability != nil && g.catalog != nil && g.catalog.IsFreeModel(route.ID) {
+		bodySnippet := ""
+		if !success && (status == 400 || status == 404 || status == 410 || status == 422) {
+			bodySnippet = string(peekResponseBody(resp))
+		}
+		_ = g.availability.RecordPassiveObservation(route.ID, success, status, bodySnippet, channel, time.Now().UTC())
+	}
 	if g.monitor == nil {
 		return
 	}

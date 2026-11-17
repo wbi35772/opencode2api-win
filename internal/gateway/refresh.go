@@ -12,7 +12,13 @@ import (
 )
 
 const (
-	proxyHealthCheckURL      = "https://cloudflare.com/cdn-cgi/trace"
+	// The probe answers "can this exit serve traffic?", so it targets the
+	// OpenCode origin itself. cloudflare.com is an unrelated third party that
+	// proxy providers routinely block or rate-limit on their egress, so exits
+	// that serve OpenCode fine were disabled and eventually retired by a probe
+	// that never touched OpenCode. checkClaimedProxy counts any HTTP response
+	// as success, so a 404 from the origin still proves the tunnel reaches it.
+	proxyHealthCheckURL      = "https://opencode.ai/"
 	proxyHealthCheckInterval = 15 * time.Minute
 	proxyHealthCheckTimeout  = 10 * time.Second
 )
@@ -163,41 +169,11 @@ func (g *Gateway) applyProxyHealthResult(result proxyHealthResult, source string
 // models, and fetches OpenCode's protocol capabilities. The catalog is
 // replaced only when at least one listing succeeded; the rotation groups are
 // then resynced and the catalog cache saved.
+//
+// Overlapping refreshes are skipped, so a slow round does not stack.
 func (g *Gateway) StartModelRefresh(ctx context.Context) {
-	refresh := func() {
-		var zen, goModels []string
-		var capabilities modelcatalog.Capabilities
-		var capabilitiesErr error
-		var wg sync.WaitGroup
-		wg.Add(3)
-		go func() { defer wg.Done(); zen = g.refreshZen(ctx) }()
-		go func() { defer wg.Done(); goModels = g.refreshTier(ctx, g.cfg.Upstream.Go, g.goNodes) }()
-		go func() {
-			defer wg.Done()
-			capabilityCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			defer cancel()
-			capabilities, capabilitiesErr = g.refreshProtocolCapabilities(capabilityCtx)
-		}()
-		wg.Wait()
-		if ctx.Err() != nil {
-			return
-		}
-		if capabilitiesErr != nil {
-			g.logger.Warn("OpenCode capability catalog refresh failed", "component", "models", "event", "capability_refresh_failed", "error", capabilitiesErr)
-		}
-		if zen != nil || goModels != nil {
-			g.catalog.ReplaceWithCapabilities(zen, goModels, capabilities.Protocols, capabilities.Unsupported, capabilities.Metadata)
-			g.syncRotation()
-			if ctx.Err() == nil {
-				if err := g.catalog.SaveCache(); err != nil {
-					g.logger.Warn("model catalog cache write failed", "component", "models", "event", "catalog_cache_write_failed", "error", err)
-				}
-			}
-			g.logger.Info("model catalog refreshed", "component", "models", "event", "catalog_refreshed", "models", len(g.catalog.List()))
-		}
-	}
 	go func() {
-		refresh()
+		g.RefreshCatalog(ctx)
 		ticker := time.NewTicker(time.Duration(g.cfg.Models.RefreshSeconds) * time.Second)
 		defer ticker.Stop()
 		for {
@@ -205,10 +181,49 @@ func (g *Gateway) StartModelRefresh(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				refresh()
+				g.RefreshCatalog(ctx)
 			}
 		}
 	}()
+}
+
+// RefreshCatalog refreshes the catalog once. Concurrent or overlapping
+// executions on this gateway are skipped.
+func (g *Gateway) RefreshCatalog(ctx context.Context) {
+	if !g.refreshMu.TryLock() {
+		return
+	}
+	defer g.refreshMu.Unlock()
+	var zen, goModels []string
+	var capabilities modelcatalog.Capabilities
+	var capabilitiesErr error
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() { defer wg.Done(); zen = g.refreshZen(ctx) }()
+	go func() { defer wg.Done(); goModels = g.refreshTier(ctx, g.cfg.Upstream.Go, g.goNodes) }()
+	go func() {
+		defer wg.Done()
+		capabilityCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		capabilities, capabilitiesErr = g.refreshProtocolCapabilities(capabilityCtx)
+	}()
+	wg.Wait()
+	if ctx.Err() != nil {
+		return
+	}
+	if capabilitiesErr != nil {
+		g.logger.Warn("OpenCode capability catalog refresh failed", "component", "models", "event", "capability_refresh_failed", "error", capabilitiesErr)
+	}
+	if zen != nil || goModels != nil {
+		g.catalog.ReplaceWithCapabilities(zen, goModels, capabilities.Protocols, capabilities.Unsupported, capabilities.Metadata)
+		g.syncRotation()
+		if ctx.Err() == nil {
+			if err := g.catalog.SaveCache(); err != nil {
+				g.logger.Warn("model catalog cache write failed", "component", "models", "event", "catalog_cache_write_failed", "error", err)
+			}
+		}
+		g.logger.Info("model catalog refreshed", "component", "models", "event", "catalog_refreshed", "models", len(g.catalog.List()))
+	}
 }
 
 // refreshProtocolCapabilities fetches OpenCode's capability catalog through
