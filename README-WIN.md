@@ -1,11 +1,11 @@
 # opencode2api Windows 独立测试版
 
-这个目录是 Windows 二次开发的**独立 Git 仓库**：以主仓库 `2bf547c` 为基线，2026-11-01 合并上游 `v1.4.6`（`58f5667`），2026-11-16/17 对齐上游 `v1.4.8`（`159d7fdf`），Windows 版本号为 **`v1.4.8-win.1`**。源码、WebUI、文档和 Windows 运行脚本都在这里，修改不会影响上一级目录。
+这个目录是 Windows 二次开发的**独立 Git 仓库**：以主仓库 `2bf547c` 为基线，2026-11-01 合并上游 `v1.4.6`（`58f5667`），2026-11-16/17 对齐上游 `v1.4.8`（`159d7fdf`）并补齐 `v1.4.7` 区间遗漏，Windows 版本号为 **`v1.4.8-win.2`**。源码、WebUI、文档和 Windows 运行脚本都在这里，修改不会影响上一级目录。
 
-完整文档在 [`doc/README.md`](doc/README.md)，当前版本的完整基线、验证矩阵和回滚步骤见 [`doc/12-版本基线-v1.4.8-win.1.md`](doc/12-版本基线-v1.4.8-win.1.md)。仓库同时备份在 Forgejo `xiaoming/opencode2api-win`，换机恢复和 Release 资产见 [`doc/08-备份与恢复.md`](doc/08-备份与恢复.md)。
+完整文档在 [`doc/README.md`](doc/README.md)，当前版本的完整基线、验证矩阵和回滚步骤见 [`doc/12-版本基线-v1.4.8-win.2.md`](doc/12-版本基线-v1.4.8-win.2.md)。仓库同时备份在 Forgejo `xiaoming/opencode2api-win`，换机恢复和 Release 资产见 [`doc/08-备份与恢复.md`](doc/08-备份与恢复.md)。
 
-- 构建环境：Windows 11 x64，Go 1.24.0，`CGO_ENABLED=0`，`-trimpath`
-- 二进制：`opencode2api.exe`（约 19.9 MB，静态构建，不需要额外 DLL）
+- 构建环境：Windows 11 x64，Go 1.24.0，`CGO_ENABLED=0`，`-trimpath -ldflags "-s -w"`
+- 二进制：`opencode2api.exe`（约 13.9 MB，静态构建，不需要额外 DLL）
 - 配置：`config.json`，首次启动已把 WebUI 密码转成 Argon2id 哈希
 - 默认只监听本机回环地址；当前测试配置为 `0.0.0.0:28080`，请自行确认防火墙范围
 
@@ -13,16 +13,16 @@
 
 | 项目 | 值 |
 |---|---|
-| 版本 | `v1.4.8-win.1` |
+| 版本 | `v1.4.8-win.2` |
 | 上游基线 | `v1.4.8`（`159d7fdf`，2026-11-16T21:34Z） |
-| 构建命令 | `go build -trimpath -ldflags "-X main.version=v1.4.8-win.1" -o opencode2api.exe ./cmd/opencode2api` |
-| SHA-256 | `BAB8F334330E226CD1CF31A4AEA7FCFCDBB4F3EFEDC533EE4F1946E75F9BC90B` |
-| 运行进程（基线记录） | PID 25236，2026-11-16 23:09:32 启动 |
+| 构建命令 | `go build -trimpath -ldflags "-s -w -X main.version=v1.4.8-win.2" -o opencode2api.exe ./cmd/opencode2api` |
+| SHA-256 | `CDFD9834AD3B20455A81449D8F320BCF866FEC23DA7BFE5FA9C246025D343CFD` |
+| 运行进程（基线记录） | PID 23088，2026-11-17 04:52:19 启动 |
 | 上游 Key | 无（`zen_keys=[]`、`go_keys=[]`），只跑匿名免费道 |
 | 模型目录 | 86 个，暴露 12 个 |
-| 免费道验证 | 极简 `200/29.1s`；带 tools 非流式 `200/35.1s`；带 tools 流式 `200/8.0s` |
+| 免费道验证 | 极简 `200/3.1s`；带 tools 非流式 `200/5.2s`；带 tools 流式 `200/4.6s`；工具调用 `200/13.6s` |
 
-本次版本的核心修复是上游 `#182` 的工具名前缀：旧二进制仍发送 `clint_`，免费层会直接返回 `429 Free usage limit`；新版本统一改为 `mcp_`。另外补上了 v1.4.8 的重试硬化、title 请求回退、`prompt_environment`、相邻 assistant 消息合并、Playground 固定中转和 Go 订阅占位。完整清单见 `CHANGELOG.md` 和 `doc/12`。
+win.1 的核心修复是上游 `#182` 的工具名前缀：旧二进制仍发送 `clint_`，免费层会直接返回 `429 Free usage limit`；新版本统一改为 `mcp_`。win.2 补齐了 `v1.4.7` 区间遗漏：`#166` 官方工具别名与流式收尾、`#171` 被动可用性记账与 `models.active_probes` 开关、`#153` 改用 OpenCode 原点 + Bun TLS 指纹做代理健康探测。`#167` Playground 固定 relay 未移植（只影响诊断页）。完整清单见 `CHANGELOG.md` 和 `doc/12`。
 
 ## 当前测试地址
 
@@ -54,7 +54,8 @@ curl.exe --noproxy "*" http://127.0.0.1:28080/healthz
 
 - 本目录是独立仓库，`upstream` 指向主仓库。Windows 侧 WARP 改动（物理网卡绑定、启动失败后台重试、SOCKS5 UDP、池/注册器加固）全部保留。
 - 2026-11-01 合并上游 `v1.4.6`（`58f5667`，合并提交 `a93d805`）：暗色主题、请求/上游尝试分页、`POST /api/models/probe`、配置页代理 chip 折叠。
-- 2026-11-16/17 对齐上游 `v1.4.8`（`159d7fdf`）：`mcp_` 工具前缀（#182）、重试与响应所有权硬化（Refs #173/175/176/178/179/181）、title 单次尝试与本地回退、`prompt_environment`、legacy `functions` 一次改名、相邻 assistant 合并、Playground 固定中转（#167）、Go 订阅占位（#168）。
+- 2026-11-16/17 对齐上游 `v1.4.8`（`159d7fdf`）：`mcp_` 工具前缀（#182）、重试与响应所有权硬化（Refs #173/175/176/178/179/181）、title 单次尝试与本地回退、`prompt_environment`、legacy `functions` 一次改名、相邻 assistant 合并、Go 订阅占位（#168）。
+- `v1.4.8-win.2` 补齐 `v1.4.7` 区间：`#166` 官方工具别名/流式收尾、`#171` 被动可用性 + `active_probes` 开关、`#153` OpenCode 原点探测 + Bun 客户端。`#167` 未移植。
 - v1.4.8 之后的上游提交（例如未发版的 `0d05fe93`：匿名默认关闭 + 批量代理管理）**尚未移植**；升级前先确认上游是否已发版。
 - 以后同步：`git fetch upstream main && git merge upstream/main`，合并前确认工作区状态可回滚。工作区故意保留本地改动时，先做补丁或备份。
 
@@ -150,7 +151,7 @@ OPENAI_API_KEY=sk-win-local-test
     "source_ipv6": ""
   },
   "proxies": ["socks5://127.0.0.1:7897"],
-  "models": { "free_only": true },
+  "models": { "free_only": true, "active_probes": false },
   "retry": { "max_attempts": 60, "timeout_seconds": 300 },
   "webui": {
     "enabled": true,
@@ -171,7 +172,7 @@ OPENAI_API_KEY=sk-win-local-test
 ```powershell
 $env:PATH = 'C:\Go\go\bin;' + $env:PATH
 $env:CGO_ENABLED = "0"
-go build -trimpath -ldflags "-X main.version=v1.4.8-win.1" -o opencode2api.exe ./cmd/opencode2api
+go build -trimpath -ldflags "-s -w -X main.version=v1.4.8-win.2" -o opencode2api.exe ./cmd/opencode2api
 ```
 
 只需要 Go 1.24+；项目没有 cgo 依赖。构建完成后重启进程即可。发布前至少执行：
@@ -196,7 +197,7 @@ oc2-win/
   start-supervised.ps1
   start-background.ps1
   stop-opencode2api.ps1
-  doc/                 完整文档（含 12-版本基线-v1.4.8-win.1.md）
+  doc/                 完整文档（含 12-版本基线-v1.4.8-win.2.md）
   docs/                管理 API 与 Linux WARP 农场
   logs/                运行日志和 PID
 ```

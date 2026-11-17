@@ -2,7 +2,7 @@
 
 这套文档描述 `oc2-win/` 这份 Windows 独立部署。它在主仓库源码之上单独复制了一份代码和二进制，改这里不会影响仓库根目录。
 
-当前基线：**v1.4.8-win.1**（上游 `v1.4.8` / `159d7fdf`，2026-11-17）。完整发布说明、验证矩阵、配置快照、回滚步骤和维护清单见 [12-版本基线-v1.4.8-win.1.md](12-版本基线-v1.4.8-win.1.md)；版本历史见根目录 `CHANGELOG.md`。
+当前基线：**v1.4.8-win.2**（上游 `v1.4.8` / `159d7fdf`，2026-11-17）。完整发布说明、验证矩阵、配置快照、回滚步骤和维护清单见 [12-版本基线-v1.4.8-win.2.md](12-版本基线-v1.4.8-win.2.md)；版本历史见根目录 `CHANGELOG.md`。
 
 ## 文档索引
 
@@ -19,14 +19,14 @@
 | [09-WARP-SOCKS5-UDP-基线.md](09-WARP-SOCKS5-UDP-基线.md) | 当前部署基线、SOCKS5 UDP 数据路径、验证记录、换节点与回滚 |
 | [10-线路切换与WARP排障记录.md](10-线路切换与WARP排障记录.md) | 2026-11-07 排障记录、参数体检、换线后长时间 -1 的排查手册、cfnew/UDP 结论 |
 | [11-进度存档-2026-11-10.md](11-进度存档-2026-11-10.md) | 历史交接：Clash 线路修复与 429 复核 |
-| [12-版本基线-v1.4.8-win.1.md](12-版本基线-v1.4.8-win.1.md) | **当前版本基线**：变更、证据、配置、部署/回滚、维护清单 |
+| [12-版本基线-v1.4.8-win.2.md](12-版本基线-v1.4.8-win.2.md) | **当前版本基线**：变更、证据、配置、部署/回滚、维护清单 |
 
 ## 一分钟速查
 
 | 项目 | 值 |
 |---|---|
-| 版本 | `v1.4.8-win.1` |
-| 二进制 | `opencode2api.exe`，SHA-256 `BAB8F334330E226CD1CF31A4AEA7FCFCDBB4F3EFEDC533EE4F1946E75F9BC90B` |
+| 版本 | `v1.4.8-win.2` |
+| 二进制 | `opencode2api.exe`，SHA-256 `CDFD9834AD3B20455A81449D8F320BCF866FEC23DA7BFE5FA9C246025D343CFD` |
 | API Base | `http://127.0.0.1:28080/v1` |
 | WebUI | `http://127.0.0.1:28081` |
 | API Key | `sk-win-local-test` |
@@ -34,25 +34,25 @@
 | 后台启动 | `.\start-background.ps1` |
 | 后台停止 | `.\stop-opencode2api.ps1` |
 | 健康检查 | `curl.exe --noproxy "*" http://127.0.0.1:28080/healthz` |
-| 基线画布 | Canvas `06GYGTFD20BS4E5T3MAXZZ2376-opencode2api-win-2026-11-17-v1-4-8-win-1` |
-| 发布包 | `release/opencode2api-v1.4.8-win.1.zip` |
-| 日志 | `logs\stdout.log`、`logs\stderr.log`、`logs\pid.txt`，以及 `logs\run-v1.4.8-win.1-*.log` |
+| 基线画布 | Canvas `06GYK5J08WVHTJQ0RWYNZM0EMS-opencode2api-win-2026-11-17-v1-4-8-win-2` |
+| 发布包 | `release/opencode2api-v1.4.8-win.2.zip` |
+| 日志 | `logs\stdout.log`、`logs\stderr.log`、`logs\pid.txt`，以及 `logs\run-v1.4.8-win.2-*.log` |
 
 ## 当前运行状态（2026-11-17 实测）
 
 ```json
-{"status":"ok","ready":true,"version":"v1.4.8-win.1",
+{"status":"ok","ready":true,"version":"v1.4.8-win.2",
  "models":{"status":"ready","total":86,"exposed":12},
  "keys":{"zen":0,"go":0,"total":0,"anonymous":true},
- "warp":{"status":"ready","stack":"ipv6","size":32,"preload":12,"active":8,"standby":7,"cooling":4}}
+ "warp":{"status":"ready","stack":"ipv6","size":32,"preload":12,"active":1,"standby":1,"cooling":10}}
 ```
 
 - 当前只用匿名免费道（`zen_keys`、`go_keys` 为空），不依赖付费账号 Key。
 - `warp.pool_size=32`，`preload=12`；`cooling` 是历史 `/64` 冷却记录，不代表当前不可用。
 - 免费配额按 **(project, 出口 /64)** 计：一个成功请求会消耗一个出口，池子约每 30–40 秒补一个；`active=0` 且 `cooling` 很多时等池子回血。
 - WireGuard 外层 UDP 经 `socks_udp`（`socks5://127.0.0.1:7897`）中继；注册 HTTPS 走 `proxies[0]`。
-- 免费道实测：极简 `200/29.1s`；带 tools 非流式 `200/35.1s`；带 tools 流式 `200/8.0s`。
-- 完整排障、参数体检、预检实现和换线手册见 [10-线路切换与WARP排障记录.md](10-线路切换与WARP排障记录.md)；当前版本的免费道修复见 [12](12-版本基线-v1.4.8-win.1.md)。
+- 免费道实测：极简 `200/3.1s`；带 tools 非流式 `200/5.2s`；带 tools 流式 `200/4.6s`；工具调用 `200/13.6s`。
+- 完整排障、参数体检、预检实现和换线手册见 [10-线路切换与WARP排障记录.md](10-线路切换与WARP排障记录.md)；当前版本的免费道修复与上游补齐见 [12](12-版本基线-v1.4.8-win.2.md)。
 
 ## 目录约定
 
@@ -61,7 +61,7 @@ oc2-win/
   cmd/ internal/ webui/ assets/   源码（已复制，可独立构建）
   config.json                     当前运行配置（不要提交）
   config.example.json             原始模板
-  opencode2api.exe                已构建二进制（v1.4.8-win.1）
+  opencode2api.exe                已构建二进制（v1.4.8-win.2）
   README-WIN.md                   快速上手
   doc/                            本文档目录
   docs/                           管理 API 与 Linux WARP 农场

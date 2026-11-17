@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>opencode2api-win 增量基线 · v1.4.8-win.2</title>
+<style>
+:root{
+  --bg:#f3f5f9; --panel:#ffffff; --ink:#141a24; --muted:#5d6879; --line:#dfe4ec;
+  --accent:#2457d6; --accent-soft:#eef2ff; --ok:#0e7c66; --ok-soft:#e7f6f1;
+  --warn:#a15c07; --warn-soft:#fff5e3; --err:#b42318; --err-soft:#fdecea;
+  --code:#111827; --code-ink:#e8eef8; --mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",Menlo,monospace;
+  --shadow:0 1px 2px rgba(20,26,36,.04),0 10px 30px rgba(20,26,36,.06);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.app{display:grid;grid-template-columns:264px minmax(0,1fr);min-height:100vh}
+.sidebar{position:sticky;top:0;height:100vh;overflow:auto;padding:22px 18px;background:#fbfcfe;border-right:1px solid var(--line)}
+.brand{display:flex;gap:11px;align-items:center;margin-bottom:18px}
+.logo{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:linear-gradient(135deg,#2457d6,#6b8cff);color:#fff;font-weight:800;font-size:13px;letter-spacing:.4px;box-shadow:0 6px 16px rgba(36,87,214,.25)}
+.brand strong{display:block;font-size:14px;line-height:1.25}
+.brand small{display:block;color:var(--muted);font-size:11px;margin-top:3px}
+.ver{display:inline-flex;align-items:center;gap:7px;padding:5px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:12px;font-weight:700;margin-bottom:16px}
+.ver:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px rgba(14,124,102,.15)}
+nav{display:flex;flex-direction:column;gap:2px}
+nav a{padding:7px 9px;border-radius:8px;color:var(--muted);font-size:12.5px;line-height:1.35}
+nav a:hover{background:#f0f3f9;color:var(--ink);text-decoration:none}
+nav a b{color:#aab3c2;font-weight:600;display:inline-block;width:20px}
+.side-foot{margin-top:22px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:11.5px;line-height:1.5}
+.side-foot strong{color:var(--ink);font-size:12.5px}
+main{min-width:0;padding:26px 30px 70px;max-width:1180px;margin:0 auto}
+.hero{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:20px;background:radial-gradient(700px 260px at 92% -10%,rgba(36,87,214,.10),transparent 70%),radial-gradient(520px 220px at 6% 110%,rgba(14,124,102,.08),transparent 70%),linear-gradient(180deg,#fff,#fbfcff);padding:30px 30px 26px;box-shadow:var(--shadow);margin-bottom:22px}
+.hero:after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.45;background-image:linear-gradient(rgba(36,87,214,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(36,87,214,.05) 1px,transparent 1px);background-size:26px 26px;mask-image:linear-gradient(180deg,transparent,#000 60%,transparent)}
+.eyebrow{color:var(--accent);font-size:12px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;position:relative;z-index:1}
+h1{position:relative;z-index:1;font-size:clamp(27px,4vw,42px);line-height:1.12;margin:10px 0 8px;letter-spacing:-.8px}
+h1 span{color:var(--muted);font-weight:600;font-size:.62em;letter-spacing:-.2px;white-space:nowrap}
+.lede{position:relative;z-index:1;margin:0;color:var(--muted);max-width:840px;font-size:14.5px}
+.badges{position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:7px;margin:16px 0 20px}
+.badge{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:#fff;border-radius:999px;padding:4px 10px;font-size:11.5px;color:var(--muted)}
+.badge:before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.badge.ok{background:var(--ok-soft);border-color:#c9e9df;color:#0a5f4e}.badge.ok:before{background:var(--ok)}
+.badge.warn{background:var(--warn-soft);border-color:#f0ddb8;color:#7a4706}.badge.warn:before{background:var(--warn)}
+.hero-grid{position:relative;z-index:1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.stat{border:1px solid var(--line);background:rgba(255,255,255,.82);border-radius:13px;padding:12px 13px}
+.stat span{display:block;color:var(--muted);font-size:11px;letter-spacing:.2px}
+.stat strong{display:block;font-size:17px;line-height:1.3;margin:3px 0 2px;letter-spacing:-.3px}
+.stat small{display:block;color:var(--muted);font-size:10.5px;line-height:1.35}
+section{margin:30px 0 0;scroll-margin-top:18px}
+h2{display:flex;align-items:center;gap:10px;margin:0 0 12px;font-size:21px;letter-spacing:-.3px}
+h2 .num{display:inline-grid;place-items:center;width:29px;height:29px;border-radius:9px;background:var(--accent-soft);color:var(--accent);font-size:12px;font-weight:800;flex:none}
+h3{margin:20px 0 8px;font-size:15.5px;letter-spacing:-.1px}
+p{margin:8px 0}
+.muted{color:var(--muted)}
+.small{font-size:12.5px}
+.card{border:1px solid var(--line);background:var(--panel);border-radius:15px;padding:17px 18px;box-shadow:var(--shadow)}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.callout{border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:12px;background:#fff;padding:13px 15px;margin:12px 0}
+.callout.ok{border-left-color:var(--ok);background:linear-gradient(180deg,#fff,#f7fdfa)}
+.callout.warn{border-left-color:var(--warn);background:linear-gradient(180deg,#fff,#fffbf2)}
+.callout.err{border-left-color:var(--err);background:linear-gradient(180deg,#fff,#fff7f6)}
+.callout strong{display:block;margin-bottom:3px}
+.callout p:last-child{margin-bottom:0}
+.k{font-family:var(--mono);font-size:12px;background:#f2f5fa;border:1px solid #e3e8f1;border-radius:6px;padding:1px 6px;white-space:nowrap}
+.mono{font-family:var(--mono)}
+.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:13px;background:#fff;box-shadow:var(--shadow)}
+table{width:100%;border-collapse:collapse;font-size:12.8px;min-width:620px}
+th,td{padding:9px 12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+th{background:#f7f9fc;color:#465267;font-size:11.5px;letter-spacing:.3px;font-weight:700;white-space:nowrap}
+td:first-child{white-space:nowrap;color:#4b5668}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:#fbfcff}
+.tag{display:inline-block;border-radius:6px;padding:1px 7px;font-size:10.5px;font-weight:700;line-height:1.7;white-space:nowrap}
+.tag.ok{background:var(--ok-soft);color:#0a5f4e}
+.tag.info{background:var(--accent-soft);color:#1b47b5}
+.tag.warn{background:var(--warn-soft);color:#7a4706}
+.tag.err{background:var(--err-soft);color:#8f1b13}
+.tag.gray{background:#f0f3f8;color:#576274}
+pre{margin:10px 0;background:var(--code);color:var(--code-ink);border-radius:12px;padding:14px 16px;overflow:auto;font:12.2px/1.65 var(--mono);border:1px solid #1f2937}
+pre code{font:inherit;white-space:pre}
+.diagram{border:1px solid var(--line);border-radius:15px;background:#fff;padding:14px;box-shadow:var(--shadow);overflow:auto}
+.diagram svg{display:block;width:100%;height:auto;min-width:640px}
+.caption{color:var(--muted);font-size:11.5px;margin:8px 2px 0}
+.svg-box{fill:#fff;stroke:#cdd6e4;stroke-width:1.2}
+.svg-box-accent{fill:#f4f7ff;stroke:#b9c9f7}
+.svg-box-ok{fill:#f2fbf8;stroke:#bfe6da}
+.svg-title{font:700 12.5px "Segoe UI","Noto Sans SC",sans-serif;fill:#1d2736}
+.svg-sub{font:11px "Segoe UI","Noto Sans SC",sans-serif;fill:#647084}
+.svg-arrow{stroke:#8a97ab;stroke-width:1.4;fill:none}
+.svg-arrow-accent{stroke:#2457d6;stroke-width:1.6;fill:none}
+.checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:8px 0}
+.check{display:flex;gap:9px;align-items:flex-start;border:1px solid var(--line);border-radius:10px;padding:9px 10px;background:#fff;font-size:12.3px}
+.check .mark{width:17px;height:17px;border-radius:50%;background:var(--ok-soft);color:var(--ok);display:grid;place-items:center;font-size:11px;font-weight:800;flex:none;margin-top:1px}
+.check .mark.w{background:var(--warn-soft);color:var(--warn)}
+.check b{display:block;font-size:12.5px}
+.check small{display:block;color:var(--muted);line-height:1.45;margin-top:1px}
+.footer{margin-top:36px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:11.5px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.to-top{position:fixed;right:18px;bottom:18px;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:#fff;border:1px solid var(--line);color:var(--accent);box-shadow:var(--shadow);font-size:15px}
+.to-top:hover{text-decoration:none;background:var(--accent-soft)}
+@media (max-width:980px){
+  .app{grid-template-columns:1fr}
+  .sidebar{position:relative;height:auto;border-right:0;border-bottom:1px solid var(--line);padding:16px 18px}
+  nav{flex-direction:row;overflow:auto;gap:4px;padding-bottom:2px}
+  nav a{white-space:nowrap;background:#f4f7fb}
+  .side-foot{display:none}
+  main{padding:20px 16px 54px}
+  .hero{padding:24px 18px 20px;border-radius:16px}
+  .hero-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .g3,.g4{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:620px){.g2,.g3,.g4,.checks{grid-template-columns:1fr}h1 span{display:block;margin-top:4px}}
+@media print{.sidebar,.to-top{display:none}.app{display:block}main{max-width:none;padding:0}body{background:#fff}.hero,.card,.diagram,.table-wrap{box-shadow:none}section{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+  <div class="brand">
+    <div class="logo">o2</div>
+    <div><strong>opencode2api</strong><small>Windows 独立部署 · win.2 增量</small></div>
+  </div>
+  <div class="ver">v1.4.8-win.2 · 已部署</div>
+  <nav>
+    <a href="#summary"><b>00</b>先看结论</a>
+    <a href="#changes"><b>01</b>本版补了什么</a>
+    <a href="#evidence"><b>02</b>验证证据</a>
+    <a href="#delta"><b>03</b>与 win.1 的差异</a>
+    <a href="#config"><b>04</b>当前配置</a>
+    <a href="#deploy"><b>05</b>部署与回滚</a>
+    <a href="#maintain"><b>06</b>维护清单</a>
+    <a href="#links"><b>07</b>关联文档</a>
+  </nav>
+  <div class="side-foot">
+    基线日期<br><strong>2026-11-17</strong><br><br>
+    上游基线<br><strong>v1.4.8 / 159d7fdf</strong><br><br>
+    维护入口<br>doc/12 · BASELINE.md · CHANGELOG.md
+  </div>
+</aside>
+
+<main>
+<header class="hero">
+  <div class="eyebrow">opencode2api · Windows x64 · 增量基线</div>
+  <h1>win.2 增量基线 <span>2026-11-17</span></h1>
+  <p class="lede">这份画布只记录 <b>v1.4.8-win.2</b> 相对 win.1 的增量：补齐 <b>#166 / #171 / #153</b>、修正 #167 的错误声明、重新构建部署，以及真实请求验证。完整历史仍看 win.1 基线画布与 <span class="mono">doc/12</span>。</p>
+  <div class="badges">
+    <span class="badge ok">已部署</span>
+    <span class="badge ok">免费道 200</span>
+    <span class="badge ok">工具调用回环</span>
+    <span class="badge">upstream v1.4.8</span>
+    <span class="badge">Go 1.24.0</span>
+    <span class="badge warn">#167 未移植</span>
+  </div>
+  <div class="hero-grid">
+    <div class="stat"><span>版本</span><strong>v1.4.8-win.2</strong><small>upstream 159d7fdf</small></div>
+    <div class="stat"><span>体积</span><strong>13.3 MiB</strong><small>13,925,376 B · -s -w</small></div>
+    <div class="stat"><span>免费道实测</span><strong>200 OK</strong><small>3.12s / 4.56s / 13.58s</small></div>
+    <div class="stat"><span>运行</span><strong>PID 23088</strong><small>0.0.0.0:28080</small></div>
+  </div>
+</header>
+
+<section id="summary">
+  <h2><span class="num">00</span>先看结论</h2>
+  <div class="grid g3">
+    <div class="card">
+      <span class="tag ok">已补齐</span>
+      <h3 style="margin-top:9px">#166 官方工具与流式收尾</h3>
+      <p class="small muted">补齐 <span class="k">official</span> 别名表、声明名收集、未决工具名的参数扣留，以及流结束时的补帧与 <span class="k">finish_reason</span> 收尾。修复幽灵工具调用和末帧丢失。</p>
+    </div>
+    <div class="card">
+      <span class="tag ok">已补齐</span>
+      <h3 style="margin-top:9px">#171 + #153 可用性与探测</h3>
+      <p class="small muted">被动可用性记账接管真实流量；主动探测改为显式开关（默认关闭）。代理健康探测改打 <span class="k">https://opencode.ai/</span>，并使用 Bun TLS 指纹客户端。</p>
+    </div>
+    <div class="card">
+      <span class="tag err">纠错</span>
+      <h3 style="margin-top:9px">#167 从未移植</h3>
+      <p class="small muted">win.1 文档与画布把 Playground 固定 relay 写成“已对齐”，实际 <span class="k">git log -S RelaySelection</span> 为空。本版文档已改正；该功能仍未实现，只影响诊断页。</p>
+    </div>
+  </div>
+  <div class="callout ok">
+    <strong>一句话基线</strong>
+    <p>源码在 win.1 基础上向前对齐了 v1.4.6→v1.4.7 区间遗漏的三个提交；二进制 <span class="mono">CDFD9834…</span>，部署后匿名免费道在无账号 Key 下完成普通、流式工具、强制工具调用三类 200 验证。</p>
+  </div>
+</section>
+
+<section id="changes">
+  <h2><span class="num">01</span>本版补了什么</h2>
+  <p class="muted small">从上游 <span class="mono">v1.4.6..v1.4.7</span> 的 7 个提交中，Windows 版此前缺 4 个。本版移植 3 个，保留 1 个不移植并由文档明确标注。</p>
+  <div class="diagram" style="margin-top:12px">
+    <svg viewBox="0 0 820 210" role="img" aria-label="win.2 补丁落点图">
+      <rect class="svg-box-accent" x="12" y="18" width="176" height="164" rx="10"/>
+      <text class="svg-title" x="28" y="42">上游提交</text>
+      <text class="svg-sub" x="28" y="66">87e7983 · #166</text>
+      <text class="svg-sub" x="28" y="86">cee32f7 · #171</text>
+      <text class="svg-sub" x="28" y="106">079cd7b · #153</text>
+      <text class="svg-sub" x="28" y="126">b296a61 · #167</text>
+      <text class="svg-sub" x="28" y="158" fill="#a15c07">#167 保留未移植</text>
+
+      <path class="svg-arrow-accent" d="M188 70 H250"/>
+      <path class="svg-arrow-accent" d="M188 90 H250"/>
+      <path class="svg-arrow-accent" d="M188 110 H250"/>
+      <path class="svg-arrow" d="M188 130 H250" stroke-dasharray="4 4"/>
+
+      <rect class="svg-box" x="250" y="18" width="300" height="164" rx="10"/>
+      <text class="svg-title" x="266" y="42">本地代码落点</text>
+      <text class="svg-sub" x="266" y="66">protocol/tools.go · official 别名</text>
+      <text class="svg-sub" x="266" y="86">gateway/toolshape.go · 声明名</text>
+      <text class="svg-sub" x="266" y="106">protocol/stream.go · 收尾补帧</text>
+      <text class="svg-sub" x="266" y="126">models/availability.go · 被动记账</text>
+      <text class="svg-sub" x="266" y="146">gateway/refresh.go · 探测目标</text>
+      <text class="svg-sub" x="266" y="166">gateway/pool.go · Bun 探测客户端</text>
+
+      <path class="svg-arrow-accent" d="M550 100 H612"/>
+
+      <rect class="svg-box-ok" x="612" y="52" width="196" height="96" rx="10"/>
+      <text class="svg-title" x="628" y="78">验证</text>
+      <text class="svg-sub" x="628" y="100">build / vet / test 全绿</text>
+      <text class="svg-sub" x="628" y="120">免费道 200 · 工具调用回环</text>
+    </svg>
+    <p class="caption"><b>图 1</b>　三个提交分别落在协议、网关和模型可用性层；#167 的诊断页 relay 固定仍未进入本仓库。</p>
+  </div>
+
+  <div class="table-wrap" style="margin-top:12px">
+    <table>
+      <thead><tr><th>提交</th><th>内容</th><th>落点</th><th>状态</th></tr></thead>
+      <tbody>
+        <tr><td><span class="mono">87e7983</span> · #166</td><td>官方工具别名表、声明名收集、流式参数扣留与 <span class="mono">finish()</span> 收尾</td><td><span class="mono">internal/protocol/tools.go</span>、<span class="mono">stream.go</span>、<span class="mono">internal/gateway/toolshape.go</span></td><td><span class="tag ok">已对齐</span></td></tr>
+        <tr><td><span class="mono">cee32f7</span> · #171</td><td>被动可用性记账、<span class="mono">models.active_probes</span> 显式开关、目录刷新重叠保护</td><td><span class="mono">internal/models/availability.go</span>、<span class="mono">internal/gateway/{availability,upstream,refresh}.go</span></td><td><span class="tag ok">已对齐</span></td></tr>
+        <tr><td><span class="mono">079cd7b</span> · #153</td><td>代理健康探测目标改为 OpenCode 源站，并使用客户端 TLS 指纹</td><td><span class="mono">internal/gateway/refresh.go</span>、<span class="mono">pool.go</span></td><td><span class="tag ok">已对齐</span></td></tr>
+        <tr><td><span class="mono">b296a61</span> · #167</td><td>Playground 请求固定到一个 relay（<span class="mono">RelaySelection</span>）</td><td>无</td><td><span class="tag err">未移植</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="evidence">
+  <h2><span class="num">02</span>验证证据</h2>
+  <p class="muted small">下面每一行都来自本机实际命令；版本号、PID 与请求耗时均为回显值。</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>项</th><th>命令 / 方法</th><th>结果</th><th>状态</th></tr></thead>
+      <tbody>
+        <tr><td>构建</td><td><span class="mono">go build ./...</span></td><td>exit 0</td><td><span class="tag ok">已验证</span></td></tr>
+        <tr><td>静态检查</td><td><span class="mono">go vet ./...</span></td><td>exit 0</td><td><span class="tag ok">已验证</span></td></tr>
+        <tr><td>单元测试</td><td><span class="mono">go test ./... -count=1</span></td><td>gateway / protocol / warp 全绿</td><td><span class="tag ok">已验证</span></td></tr>
+        <tr><td>版本注入</td><td><span class="mono">-ldflags "-s -w -X main.version=v1.4.8-win.2"</span></td><td><span class="mono">/healthz</span> version 正确</td><td><span class="tag ok">已验证</span></td></tr>
+        <tr><td>部署健康</td><td><span class="mono">curl --noproxy "*" http://127.0.0.1:28080/healthz</span></td><td>ok / ready / models 86/12 / proxies 1/1</td><td><span class="tag ok">已验证</span></td></tr>
+        <tr><td>极简请求</td><td>非流式 <span class="mono">deepseek-v4.1-flash-free</span></td><td>200 / 5.19s / PONG</td><td><span class="tag ok">已验证</span></td></tr>
+        <tr><td>重启后复测</td><td>同上</td><td>200 / 3.12s / PONG</td><td><span class="tag ok">已验证</span></td></tr>
+        <tr><td>流式 + tools</td><td>SSE，<span class="mono">finish_reason=length</span></td><td>200 / 4.56s，正常 <span class="mono">[DONE]</span></td><td><span class="tag ok">已验证</span></td></tr>
+        <tr><td>强制工具调用</td><td><span class="mono">tool_choice=required</span> · get_weather</td><td>200 / 13.58s，参数 <span class="mono">{"city":"Paris"}</span>，<span class="mono">finish_reason=tool_calls</span></td><td><span class="tag ok">已验证</span></td></tr>
+        <tr><td>被动记账</td><td>读取 availability 注册表</td><td><span class="mono">passive_traffic_succeeded</span>，2026-11-17T12:51:44Z</td><td><span class="tag ok">已验证</span></td></tr>
+        <tr><td>主动探测关闭</td><td><span class="mono">models.active_probes=false</span> 后重启</td><td>启动日志无 <span class="mono">availability_checked</span></td><td><span class="tag ok">已验证</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="delta">
+  <h2><span class="num">03</span>与 win.1 的差异</h2>
+  <div class="grid g3">
+    <div class="card"><span class="tag info">体积</span><h3 style="margin-top:9px">19.0 MiB → 13.3 MiB</h3><p class="small muted">构建参数加入 <span class="k">-s -w</span>，二进制从 19,871,232 B 降到 13,925,376 B；符号表不再随包分发。</p></div>
+    <div class="card"><span class="tag info">探测</span><h3 style="margin-top:9px">主动 → 被动</h3><p class="small muted">默认不再定时打模型探测；真实请求的 2xx 会刷新可用性，只有权威的“模型不存在/退役”响应才会禁用模型。</p></div>
+    <div class="card"><span class="tag info">工具流</span><h3 style="margin-top:9px">末帧不再丢</h3><p class="small muted">工具名未决时先扣留参数增量，流结束时补发剩余帧并写入 <span class="k">finish_reason</span>；避免客户端收到空参数或半截调用。</p></div>
+  </div>
+  <div class="callout warn">
+    <strong>仍然存在的行为边界</strong>
+    <p>免费配额仍按 <span class="k">(project, 出口 /64)</span> 计；一个成功请求消耗一个出口。WARP 依赖本机 Clash 7897 的 TCP 注册与 SOCKS5 UDP 中继；池子回血期间连续请求仍可能短时 429。</p>
+  </div>
+</section>
+
+<section id="config">
+  <h2><span class="num">04</span>当前配置</h2>
+  <pre><code>{
+  "listen": "0.0.0.0:28080",
+  "anonymous": true,
+  "zen_keys": [],
+  "go_keys": [],
+  "models": {
+    "refresh_seconds": 300,
+    "free_only": true,
+    "active_probes": false
+  },
+  "warp": {
+    "enabled": true,
+    "pool_size": 32,
+    "stack": "ipv6",
+    "socks_udp": "socks5://127.0.0.1:7897"
+  },
+  "proxies": ["socks5://127.0.0.1:7897"],
+  "retry": { "max_attempts": 60, "timeout_seconds": 300 }
+}</code></pre>
+  <p class="muted small">配置指纹与完整字段见 <span class="mono">doc/12</span> 第 6 节与 <span class="mono">BASELINE.md</span>；<span class="mono">config.json</span> 含本地密钥，不随发布包分发。WebUI 剩余额度面板只影响展示，不影响请求路径。</p>
+</section>
+
+<section id="deploy">
+  <h2><span class="num">05</span>部署与回滚</h2>
+  <pre><code># 备份并停止
+$ts = Get-Date -Format 'yyyyMMdd-HHmmss'
+Copy-Item .\opencode2api.exe ".\opencode2api.exe.bak-$ts-pre-v1.4.8-win.2" -Force
+Get-Process opencode2api -ErrorAction SilentlyContinue | Stop-Process -Force
+
+# 覆盖并启动
+Copy-Item .\release\v1.4.8-win.2\opencode2api.exe .\opencode2api.exe -Force
+.\start-background.ps1
+
+# 验证
+curl.exe --noproxy "*" http://127.0.0.1:28080/healthz</code></pre>
+  <p class="small muted">回滚：停止进程，换回 <span class="mono">opencode2api.exe.bak-20261117-035256-pre-v1.4.8-win.2</span>（即 win.1，19,871,232 B），再启动。</p>
+</section>
+
+<section id="maintain">
+  <h2><span class="num">06</span>维护清单</h2>
+  <div class="checks">
+    <div class="check"><span class="mark">1</span><div><b>同步上游</b><small><span class="mono">git fetch upstream --tags</span>，比较 <span class="mono">v1.4.8..main</span>。</small></div></div>
+    <div class="check"><span class="mark">2</span><div><b>逐提交移植</b><small>一次一个提交，先 <span class="mono">go build ./...</span>。</small></div></div>
+    <div class="check"><span class="mark">3</span><div><b>全量验证</b><small><span class="mono">go vet</span>、<span class="mono">go test ./... -count=1</span>、交叉构建。</small></div></div>
+    <div class="check"><span class="mark">4</span><div><b>新版本号</b><small><span class="mono">-X main.version=vX.Y.Z-win.N</span>；记录字节数与 SHA-256。</small></div></div>
+    <div class="check"><span class="mark">5</span><div><b>部署与实测</b><small>备份旧 exe，替换，跑 healthz 与三类免费道请求。</small></div></div>
+    <div class="check"><span class="mark">6</span><div><b>更新基线</b><small>doc/12、BASELINE、CHANGELOG、README-WIN 与本画布。</small></div></div>
+  </div>
+  <div class="callout">
+    <strong>提交边界</strong>
+    <p>工作区会保留调试脚本和未跟踪文件。提交前按文件清单 <span class="mono">git add</span> 指定路径，不要 <span class="mono">git add -A</span>。</p>
+  </div>
+</section>
+
+<section id="links">
+  <h2><span class="num">07</span>关联文档</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>文档</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td><span class="mono">doc/12-版本基线-v1.4.8-win.2.md</span></td><td>本版完整基线：变更、证据、配置、部署回滚、维护清单</td></tr>
+        <tr><td><span class="mono">doc/canvas/opencode2api-win-2026-11-17.html</span></td><td>win.1 历史基线画布（免费道三层修复全过程）</td></tr>
+        <tr><td><span class="mono">BASELINE.md</span></td><td>本机运行基线快照</td></tr>
+        <tr><td><span class="mono">CHANGELOG.md</span></td><td>版本历史与每版差异</td></tr>
+        <tr><td><span class="mono">README-WIN.md</span></td><td>上手、启动停止、API 测试</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="footer">
+  <span>opencode2api-win 增量基线 · 2026-11-17 · v1.4.8-win.2</span>
+  <span>上游 v1.4.8 / 159d7fdf · 匿名免费道</span>
+</div>
+</main>
+</div>
+<a class="to-top" href="#" aria-label="回到顶部">↑</a>
+</body>
+</html>

@@ -2,6 +2,25 @@
 
 本仓库是 `opencode2api` 的 Windows 独立分支。版本号格式：`上游版本-win.N`。
 
+## v1.4.8-win.2 — 2026-11-17
+
+### 补齐 v1.4.6→v1.4.7 区间遗漏
+
+- `#166` 官方工具名与流式收尾：`official` 别名表（`BindOfficial`/`Official`）、`OfficialToolCandidates`/`bindOfficialToolAliases`、未决工具名的参数扣留与 `finish()` 补帧、`finish_reason` 收尾；修复幽灵调用与末帧丢失。
+- `#171` 被动可用性：`RecordPassiveObservation` 按真实请求记账（仅 400/404/410/422 读 body）；`models.active_probes` 成为显式开关（默认关闭；本机运行配置也保持关闭，只用被动记账）。
+- `#153` 代理健康探测改为 `https://opencode.ai/`，并使用 Bun TLS 指纹客户端，避免第三方探测误杀可用出口。
+- WebUI 配置页新增「启用免费模型后台主动探测」（中/英/越/意）。
+
+### 修正
+
+- `#167` Playground relay 固定从未进入本仓库：win.1 的移植清单与发布说明表述有误；本版仍未包含（只影响诊断页，不影响请求路径）。
+- 构建参数补充 `-s -w` 以减小体积：`-trimpath -ldflags "-s -w -X main.version=v1.4.8-win.2"`。
+
+### 验证
+
+- `go build ./...`、`go vet ./...`、`go test ./... -count=1` 全绿。
+- 部署后实测：极简、带 tools 非流式、带 tools 流式与工具调用回环，见 `BASELINE.md` 验证矩阵。
+
 ## v1.4.8-win.1 — 2026-11-17
 
 ### 对齐上游 v1.4.8
@@ -11,7 +30,7 @@
 - title 请求预判、单次尝试、429/传输失败本地合成回退；标题请求不注入官方工具。
 - 新增 `upstream.prompt_environment`（工作目录、workspace root、平台、git 标记）。
 - legacy `functions` 只重命名一次；相邻 assistant 消息合并为一轮。
-- Playground 请求固定到一个 relay（`#167`）。
+- Playground 固定 relay（`#167`）：**未移植**（win.2 修正：该提交从未进入本仓库）。
 - Go Device OAuth 订阅登录（`#168`）：本地为配置占位，未实现完整 OAuth 流程。
 - 新增 `proxy_bindings`、`go_subscription`、`models.active_probes` 配置与 WebUI 保留逻辑。
 
