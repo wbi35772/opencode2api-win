@@ -1,28 +1,29 @@
 # opencode2api Windows 独立测试版
 
-这个目录是 Windows 二次开发的**独立 Git 仓库**：以主仓库 `2bf547c` 为基线，2026-11-01 合并上游 `v1.4.6`（`58f5667`），2026-11-16/17 对齐上游 `v1.4.8`（`159d7fdf`）并补齐 `v1.4.7` 区间遗漏，Windows 版本号为 **`v1.4.8-win.2`**。源码、WebUI、文档和 Windows 运行脚本都在这里，修改不会影响上一级目录。
+这个目录是 Windows 二次开发的**独立 Git 仓库**：以主仓库 `2bf547c` 为基线，2026-11-01 合并上游 `v1.4.6`（`58f5667`），2026-11-16/17 对齐上游 `v1.4.8`（`159d7fdf`），2026-11-21 **完整合并上游 `v1.5.1`**（`6575c62`），Windows 版本号为 **`v1.5.1-win.1`**。源码、WebUI、文档和 Windows 运行脚本都在这里，修改不会影响上一级目录。
 
-完整文档在 [`doc/README.md`](doc/README.md)，当前版本的完整基线、验证矩阵和回滚步骤见 [`doc/12-版本基线-v1.4.8-win.2.md`](doc/12-版本基线-v1.4.8-win.2.md)。仓库同时备份在 Forgejo `xiaoming/opencode2api-win`，换机恢复和 Release 资产见 [`doc/08-备份与恢复.md`](doc/08-备份与恢复.md)。
+完整文档在 [`doc/README.md`](doc/README.md)，当前版本的完整基线、验证矩阵和回滚步骤见 [`doc/12-版本基线-v1.5.1-win.1.md`](doc/12-版本基线-v1.5.1-win.1.md)。仓库同时备份在 Forgejo `xiaoming/opencode2api-win`，换机恢复和 Release 资产见 [`doc/08-备份与恢复.md`](doc/08-备份与恢复.md)。
 
 - 构建环境：Windows 11 x64，Go 1.24.0，`CGO_ENABLED=0`，`-trimpath -ldflags "-s -w"`
-- 二进制：`opencode2api.exe`（约 13.9 MB，静态构建，不需要额外 DLL）
+- 二进制：`opencode2api.exe`（约 14.3 MB，静态构建，不需要额外 DLL）
 - 配置：`config.json`，首次启动已把 WebUI 密码转成 Argon2id 哈希
 - 默认只监听本机回环地址；当前测试配置为 `0.0.0.0:28080`，请自行确认防火墙范围
 
-## 当前版本（2026-11-17）
+## 当前版本（2026-11-21）
 
 | 项目 | 值 |
 |---|---|
-| 版本 | `v1.4.8-win.2` |
-| 上游基线 | `v1.4.8`（`159d7fdf`，2026-11-16T21:34Z） |
-| 构建命令 | `go build -trimpath -ldflags "-s -w -X main.version=v1.4.8-win.2" -o opencode2api.exe ./cmd/opencode2api` |
-| SHA-256 | `CDFD9834AD3B20455A81449D8F320BCF866FEC23DA7BFE5FA9C246025D343CFD` |
-| 运行进程（基线记录） | PID 23088，2026-11-17 04:52:19 启动 |
+| 版本 | `v1.5.1-win.1` |
+| 上游基线 | `v1.5.1`（`6575c62`，2026-11-20） |
+| 构建命令 | `go build -trimpath -ldflags "-s -w -X main.version=v1.5.1-win.1" -o opencode2api.exe ./cmd/opencode2api` |
+| SHA-256 | `6D614EFC858E791EAFC8B4C3163CB8423730A19C1A2376818BC0AA1DC8F44812` |
+| 大小 | 14,328,832 字节 |
+| 运行进程（基线记录） | PID 24188，2026-11-21 02:37:47Z 启动 |
 | 上游 Key | 无（`zen_keys=[]`、`go_keys=[]`），只跑匿名免费道 |
-| 模型目录 | 86 个，暴露 12 个 |
-| 免费道验证 | 极简 `200/3.1s`；带 tools 非流式 `200/5.2s`；带 tools 流式 `200/4.6s`；工具调用 `200/13.6s` |
+| 模型目录 | 103 个，暴露 11 个（`free_only=true` 过滤后） |
+| 免费道验证 | `hy4-flash-free` 非流式 `200/16.8s`；流式 + `tool_choice=required` `200/50.0s`，`finish_reason=tool_calls`、`[DONE]` |
 
-win.1 的核心修复是上游 `#182` 的工具名前缀：旧二进制仍发送 `clint_`，免费层会直接返回 `429 Free usage limit`；新版本统一改为 `mcp_`。win.2 补齐了 `v1.4.7` 区间遗漏：`#166` 官方工具别名与流式收尾、`#171` 被动可用性记账与 `models.active_probes` 开关、`#153` 改用 OpenCode 原点 + Bun TLS 指纹做代理健康探测。`#167` Playground 固定 relay 未移植（只影响诊断页）。完整清单见 `CHANGELOG.md` 和 `doc/12`。
+本版是**第一次完整对齐上游**：v1.4.8..v1.5.1 的 4 个提交（`0d05fe9`、`e2b2a7c`、`8f691a0`、`6575c62`）全部进入源码，包括 OAuth 重构（`go_oauth`/`zen_oauth`）、客户端环境隔离（#190）、免费模型工具描述 NBSP（#188）、批量代理管理。fork 的 WARP 池、SOCKS5 UDP、24h 额度和会话亲和全部保留。完整清单见 `CHANGELOG.md` 和 `doc/12`。
 
 ## 当前测试地址
 
@@ -45,19 +46,19 @@ curl.exe --noproxy "*" http://127.0.0.1:28080/healthz
 `ready: true` 表示 API 已经可以接请求；`status: degraded` 通常只是模型目录还在刷新，等几秒会变成 `ok`。重点看 `warp` 字段：
 
 ```json
-{"status":"ready","stack":"ipv6","size":32,"preload":12,"active":8,"standby":7,"cooling":4}
+{"status":"ready","stack":"ipv6","size":32,"preload":12,"active":5,"standby":5,"cooling":62}
 ```
 
-`active=0` 且 `cooling` 很多时，免费道暂时没有可用出口，等 2–4 分钟池子回血，或按 `doc/12` 的步骤重置 `config.json.warp-state.json`。
+`active=0` 且 `cooling` 很多时，免费道暂时没有可用出口，等 2–4 分钟池子回血，或按 `doc/12` 的步骤重置 `config.json.warp-state.json`。旧 `config.json.models.catalog.json` 是 schema v3，本版会拒绝并重新拉取（上游已升到 v4），属正常现象。
 
 ## 上游同步
 
-- 本目录是独立仓库，`upstream` 指向主仓库。Windows 侧 WARP 改动（物理网卡绑定、启动失败后台重试、SOCKS5 UDP、池/注册器加固）全部保留。
+- 本目录是独立仓库，`upstream` 指向主仓库。Windows 侧 WARP 改动（物理网卡绑定、启动失败后台重试、SOCKS5 UDP、池/注册器加固、24h 黑名单、预检、会话亲和）全部保留。
 - 2026-11-01 合并上游 `v1.4.6`（`58f5667`，合并提交 `a93d805`）：暗色主题、请求/上游尝试分页、`POST /api/models/probe`、配置页代理 chip 折叠。
-- 2026-11-16/17 对齐上游 `v1.4.8`（`159d7fdf`）：`mcp_` 工具前缀（#182）、重试与响应所有权硬化（Refs #173/175/176/178/179/181）、title 单次尝试与本地回退、`prompt_environment`、legacy `functions` 一次改名、相邻 assistant 合并、Go 订阅占位（#168）。
-- `v1.4.8-win.2` 补齐 `v1.4.7` 区间：`#166` 官方工具别名/流式收尾、`#171` 被动可用性 + `active_probes` 开关、`#153` OpenCode 原点探测 + Bun 客户端。`#167` 未移植。
-- v1.4.8 之后的上游提交（例如未发版的 `0d05fe93`：匿名默认关闭 + 批量代理管理）**尚未移植**；升级前先确认上游是否已发版。
-- 以后同步：`git fetch upstream main && git merge upstream/main`，合并前确认工作区状态可回滚。工作区故意保留本地改动时，先做补丁或备份。
+- 2026-11-16/17 对齐上游 `v1.4.8`（`159d7fdf`）：`mcp_` 工具前缀（#182）、重试与响应所有权硬化（Refs #173/175/176/178/179/181）、title 单次尝试与本地回退、`prompt_environment`、legacy `functions` 一次改名、相邻 assistant 合并。
+- 2026-11-17 的 `v1.4.8-win.2` 补齐 `v1.4.7` 区间：`#166` 官方工具别名/流式收尾、`#171` 被动可用性 + `active_probes` 开关、`#153` OpenCode 原点探测 + Bun 客户端。`#167` 未移植。
+- **2026-11-21 `v1.5.1-win.1`：完整 merge 上游 v1.5.1**（`6575c62`），不再选择性移植；OAuth、批量代理、客户端环境隔离、NBSP 工具描述全部纳入。合并提交 `18b6a15`，清理提交 `e092353`。
+- 以后同步：`git fetch upstream main && git merge upstream/main`（或 merge 具体 tag）；冲突策略见 `doc/12` 第 4.2 节。工作区故意保留本地改动时，先做补丁或备份。
 
 ## 启动和停止
 
@@ -94,7 +95,7 @@ curl.exe --noproxy "*" `
 发一个对话请求。Windows PowerShell 直接传带双引号的 JSON 容易把引号吃掉，建议先写文件再 `--data-binary`：
 
 ```powershell
-$body = '{"model":"deepseek-v4.1-flash-free","messages":[{"role":"user","content":"Reply with OK only."}],"max_tokens":16,"stream":false}'
+$body = '{"model":"hy4-flash-free","messages":[{"role":"user","content":"Reply with PONG only."}],"max_tokens":16,"stream":false}'
 [IO.File]::WriteAllText("$PWD\request.json", $body, (New-Object System.Text.UTF8Encoding($false)))
 
 curl.exe --noproxy "*" -H "Authorization: Bearer sk-win-local-test" `
@@ -102,6 +103,8 @@ curl.exe --noproxy "*" -H "Authorization: Bearer sk-win-local-test" `
   --data-binary "@$PWD\request.json" `
   http://127.0.0.1:28080/v1/chat/completions
 ```
+
+> `deepseek-v4.1-flash-free` 和 `big-pickle` 也走免费道，但更容易遇到出口 429；冒烟测试优先用 `hy4-flash-free`。
 
 也可以用 OpenAI SDK：
 
@@ -119,19 +122,20 @@ OPENAI_API_KEY=sk-win-local-test
   "enabled": true,
   "pool_size": 32,
   "stack": "ipv6",
-  "socks_udp": "socks5://127.0.0.1:7897"
+  "socks_udp": "socks5://127.0.0.1:10808"
 },
-"proxies": ["socks5://127.0.0.1:7897"],
+"proxies": ["socks5://127.0.0.1:10808"],
 "performance": {
   "max_anonymous_exits": 32,
   "free_tier_block_seconds": 120
 }
 ```
 
-- 注册 HTTPS 走 `proxies[0]`；WireGuard 外层 UDP 走 `socks_udp` 的 UDP ASSOCIATE。目标站看到的是 Cloudflare 分配的 WARP IPv6，不是 7897 节点的公网 IP。
+- 注册 HTTPS 走 `proxies[0]`；WireGuard 外层 UDP 走 `socks_udp` 的 UDP ASSOCIATE。目标站看到的是 Cloudflare 分配的 WARP IPv6，不是代理节点的公网 IP。
 - `pool_size` 上限 32，`preload` 上限 12；池子按需扩容。一个成功请求会消耗一个出口，补充速度约每 30–40 秒 1 个。
 - 免费配额按 **(project, 出口 /64)** 计。`429` 时网关会先换会话身份，再退役出口；换出口但复用同一个 session 仍会 429。
 - WARP 起不来时，启动先降级继续监听，后台按 15s→30s→1m→2m→5m 重试，成功后热切换。判断依赖：`api.cloudflareclient.com` 可注册 + 到 WARP endpoint 的 UDP 2408 可通；`1.1.1.1` 只用于隧道内验证，本机直连超时不影响 WARP。
+- 本机 Clash 已从 7897 切到 `10808`（SOCKS5）/`10809`（HTTP）；旧文档里的 7897 仅是历史值。
 - 详细机制、实测和排障见 [`doc/03-网络-WARP-与出口.md`](doc/03-网络-WARP-与出口.md)、[`doc/09-WARP-SOCKS5-UDP-基线.md`](doc/09-WARP-SOCKS5-UDP-基线.md) 和 `doc/12`。
 
 ## 修改配置
@@ -147,10 +151,10 @@ OPENAI_API_KEY=sk-win-local-test
     "enabled": true,
     "pool_size": 32,
     "stack": "ipv6",
-    "socks_udp": "socks5://127.0.0.1:7897",
+    "socks_udp": "socks5://127.0.0.1:10808",
     "source_ipv6": ""
   },
-  "proxies": ["socks5://127.0.0.1:7897"],
+  "proxies": ["socks5://127.0.0.1:10808"],
   "models": { "free_only": true, "active_probes": false },
   "retry": { "max_attempts": 60, "timeout_seconds": 300 },
   "webui": {
@@ -162,6 +166,8 @@ OPENAI_API_KEY=sk-win-local-test
 }
 ```
 
+- 上游 v1.5.0 把模板里的 `anonymous` 默认值改成了 `false`；本机 `config.json` 必须显式保留 `"anonymous": true`，否则免费道不可用。
+- OAuth 字段：`go_oauth`、`zen_oauth`（旧 `go_subscription`/`zen_subscription` 可迁移读取）。本机不配置。
 - 想让局域网访问，把 `listen` 改成 `0.0.0.0:28080`，并在 Windows 防火墙放行端口；WebUI 不建议暴露到公网。
 - 换 API Key：改 `server_keys` 数组，重启。
 - 换 WebUI 密码：登录 WebUI 后在账号设置里改；也可以把 `password_hash` 换成 `password` 字段，首次启动会重新哈希。密码至少 10 个字符。
@@ -172,12 +178,13 @@ OPENAI_API_KEY=sk-win-local-test
 ```powershell
 $env:PATH = 'C:\Go\go\bin;' + $env:PATH
 $env:CGO_ENABLED = "0"
-go build -trimpath -ldflags "-s -w -X main.version=v1.4.8-win.2" -o opencode2api.exe ./cmd/opencode2api
+go build -trimpath -ldflags "-s -w -X main.version=v1.5.1-win.1" -o opencode2api.exe ./cmd/opencode2api
 ```
 
 只需要 Go 1.24+；项目没有 cgo 依赖。构建完成后重启进程即可。发布前至少执行：
 
 ```powershell
+go build ./...
 go vet ./...
 go test ./... -count=1
 ```
@@ -187,7 +194,7 @@ go test ./... -count=1
 ```text
 oc2-win/
   cmd/                 入口（opencode2api、warpchat、warpprobe）
-  internal/            网关、协议、模型、WARP 等
+  internal/            网关、协议、模型、OAuth、WARP 等
   webui/               管理界面（编译时嵌入）
   assets/              静态资源
   config.json          当前运行配置
@@ -197,9 +204,10 @@ oc2-win/
   start-supervised.ps1
   start-background.ps1
   stop-opencode2api.ps1
-  doc/                 完整文档（含 12-版本基线-v1.4.8-win.2.md）
+  doc/                 完整文档（含 12-版本基线-v1.5.1-win.1.md）
   docs/                管理 API 与 Linux WARP 农场
   logs/                运行日志和 PID
+  release/             发布产物（gitignored）
 ```
 
 ## 注意

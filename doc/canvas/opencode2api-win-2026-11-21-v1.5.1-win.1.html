@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>opencode2api-win 增量基线 · v1.5.1-win.1</title>
+<style>
+:root{
+  --bg:#f3f5f9; --panel:#ffffff; --ink:#141a24; --muted:#5d6879; --line:#dfe4ec;
+  --accent:#2457d6; --accent-soft:#eef2ff; --ok:#0e7c66; --ok-soft:#e7f6f1;
+  --warn:#a15c07; --warn-soft:#fff5e3; --err:#b42318; --err-soft:#fdecea;
+  --code:#111827; --code-ink:#e8eef8; --mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",Menlo,monospace;
+  --shadow:0 1px 2px rgba(20,26,36,.04),0 10px 30px rgba(20,26,36,.06);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.app{display:grid;grid-template-columns:264px minmax(0,1fr);min-height:100vh}
+.sidebar{position:sticky;top:0;height:100vh;overflow:auto;padding:22px 18px;background:#fbfcfe;border-right:1px solid var(--line)}
+.brand{display:flex;gap:11px;align-items:center;margin-bottom:18px}
+.logo{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:linear-gradient(135deg,#2457d6,#6b8cff);color:#fff;font-weight:800;font-size:13px;letter-spacing:.4px;box-shadow:0 6px 16px rgba(36,87,214,.25)}
+.brand strong{display:block;font-size:14px;line-height:1.25}
+.brand small{display:block;color:var(--muted);font-size:11px;margin-top:3px}
+.ver{display:inline-flex;align-items:center;gap:7px;padding:5px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:12px;font-weight:700;margin-bottom:16px}
+.ver:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px rgba(14,124,102,.15)}
+nav{display:flex;flex-direction:column;gap:2px}
+nav a{padding:7px 9px;border-radius:8px;color:var(--muted);font-size:12.5px;line-height:1.35}
+nav a:hover{background:#f0f3f9;color:var(--ink);text-decoration:none}
+nav a b{color:#aab3c2;font-weight:600;display:inline-block;width:20px}
+.side-foot{margin-top:22px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:11.5px;line-height:1.5}
+.side-foot strong{color:var(--ink);font-size:12.5px}
+main{min-width:0;padding:26px 30px 70px;max-width:1180px;margin:0 auto}
+.hero{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:20px;background:radial-gradient(700px 260px at 92% -10%,rgba(36,87,214,.10),transparent 70%),radial-gradient(520px 220px at 6% 110%,rgba(14,124,102,.08),transparent 70%),linear-gradient(180deg,#fff,#fbfcff);padding:30px 30px 26px;box-shadow:var(--shadow);margin-bottom:22px}
+.hero:after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.45;background-image:linear-gradient(rgba(36,87,214,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(36,87,214,.05) 1px,transparent 1px);background-size:26px 26px;mask-image:linear-gradient(180deg,transparent,#000 60%,transparent)}
+.eyebrow{color:var(--accent);font-size:12px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;position:relative;z-index:1}
+h1{position:relative;z-index:1;font-size:clamp(27px,4vw,42px);line-height:1.12;margin:10px 0 8px;letter-spacing:-.8px}
+h1 span{color:var(--muted);font-weight:600;font-size:.62em;letter-spacing:-.2px;white-space:nowrap}
+.lede{position:relative;z-index:1;margin:0;color:var(--muted);max-width:840px;font-size:14.5px}
+.badges{position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:7px;margin:16px 0 20px}
+.badge{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:#fff;border-radius:999px;padding:4px 10px;font-size:11.5px;color:var(--muted)}
+.badge:before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.badge.ok{background:var(--ok-soft);border-color:#c9e9df;color:#0a5f4e}.badge.ok:before{background:var(--ok)}
+.badge.warn{background:var(--warn-soft);border-color:#f0ddb8;color:#7a4706}.badge.warn:before{background:var(--warn)}
+.hero-grid{position:relative;z-index:1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.stat{border:1px solid var(--line);background:rgba(255,255,255,.82);border-radius:13px;padding:12px 13px}
+.stat span{display:block;color:var(--muted);font-size:11px;letter-spacing:.2px}
+.stat strong{display:block;font-size:17px;line-height:1.3;margin:3px 0 2px;letter-spacing:-.3px}
+.stat small{display:block;color:var(--muted);font-size:10.5px;line-height:1.35}
+section{margin:30px 0 0;scroll-margin-top:18px}
+h2{display:flex;align-items:center;gap:10px;margin:0 0 12px;font-size:21px;letter-spacing:-.3px}
+h2 .num{display:inline-grid;place-items:center;width:29px;height:29px;border-radius:9px;background:var(--accent-soft);color:var(--accent);font-size:12px;font-weight:800;flex:none}
+h3{margin:20px 0 8px;font-size:15.5px;letter-spacing:-.1px}
+p{margin:8px 0}
+.muted{color:var(--muted)}
+.small{font-size:12.5px}
+.card{border:1px solid var(--line);background:var(--panel);border-radius:15px;padding:17px 18px;box-shadow:var(--shadow)}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.callout{border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:12px;background:#fff;padding:13px 15px;margin:12px 0}
+.callout.ok{border-left-color:var(--ok);background:linear-gradient(180deg,#fff,#f7fdfa)}
+.callout.warn{border-left-color:var(--warn);background:linear-gradient(180deg,#fff,#fffbf2)}
+.callout.err{border-left-color:var(--err);background:linear-gradient(180deg,#fff,#fff7f6)}
+.callout strong{display:block;margin-bottom:3px}
+.callout p:last-child{margin-bottom:0}
+.k{font-family:var(--mono);font-size:12px;background:#f2f5fa;border:1px solid #e3e8f1;border-radius:6px;padding:1px 6px;white-space:nowrap}
+.mono{font-family:var(--mono)}
+.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:13px;background:#fff;box-shadow:var(--shadow)}
+table{width:100%;border-collapse:collapse;font-size:12.8px;min-width:620px}
+th,td{padding:9px 12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+th{background:#f7f9fc;color:#465267;font-size:11.5px;letter-spacing:.3px;font-weight:700;white-space:nowrap}
+td:first-child{white-space:nowrap;color:#4b5668}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:#fbfcff}
+.tag{display:inline-block;border-radius:6px;padding:1px 7px;font-size:10.5px;font-weight:700;line-height:1.7;white-space:nowrap}
+.tag.ok{background:var(--ok-soft);color:#0a5f4e}
+.tag.info{background:var(--accent-soft);color:#1b47b5}
+.tag.warn{background:var(--warn-soft);color:#7a4706}
+.tag.err{background:var(--err-soft);color:#8f1b13}
+.tag.gray{background:#f0f3f8;color:#576274}
+pre{margin:10px 0;background:var(--code);color:var(--code-ink);border-radius:12px;padding:14px 16px;overflow:auto;font:12.2px/1.65 var(--mono);border:1px solid #1f2937}
+pre code{font:inherit;white-space:pre}
+.diagram{border:1px solid var(--line);border-radius:15px;background:#fff;padding:14px;box-shadow:var(--shadow);overflow:auto}
+.diagram svg{display:block;width:100%;height:auto;min-width:640px}
+.caption{color:var(--muted);font-size:11.5px;margin:8px 2px 0}
+.svg-box{fill:#fff;stroke:#cdd6e4;stroke-width:1.2}
+.svg-box-accent{fill:#f4f7ff;stroke:#b9c9f7}
+.svg-box-ok{fill:#f2fbf8;stroke:#bfe6da}
+.svg-title{font:700 12.5px "Segoe UI","Noto Sans SC",sans-serif;fill:#1d2736}
+.svg-sub{font:11px "Segoe UI","Noto Sans SC",sans-serif;fill:#647084}
+.svg-arrow{stroke:#8a97ab;stroke-width:1.4;fill:none}
+.svg-arrow-accent{stroke:#2457d6;stroke-width:1.6;fill:none}
+.checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:8px 0}
+.check{display:flex;gap:9px;align-items:flex-start;border:1px solid var(--line);border-radius:10px;padding:9px 10px;background:#fff;font-size:12.3px}
+.check .mark{width:17px;height:17px;border-radius:50%;background:var(--ok-soft);color:var(--ok);display:grid;place-items:center;font-size:11px;font-weight:800;flex:none;margin-top:1px}
+.check .mark.w{background:var(--warn-soft);color:var(--warn)}
+.check b{display:block;font-size:12.5px}
+.check small{display:block;color:var(--muted);line-height:1.45;margin-top:1px}
+.footer{margin-top:36px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:11.5px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.to-top{position:fixed;right:18px;bottom:18px;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:#fff;border:1px solid var(--line);color:var(--accent);box-shadow:var(--shadow);font-size:15px}
+.to-top:hover{text-decoration:none;background:var(--accent-soft)}
+@media (max-width:980px){
+  .app{grid-template-columns:1fr}
+  .sidebar{position:relative;height:auto;border-right:0;border-bottom:1px solid var(--line);padding:16px 18px}
+  nav{flex-direction:row;overflow:auto;gap:4px;padding-bottom:2px}
+  nav a{white-space:nowrap;background:#f4f7fb}
+  .side-foot{display:none}
+  main{padding:20px 16px 54px}
+  .hero{padding:24px 18px 20px;border-radius:16px}
+  .hero-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .g3,.g4{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:620px){.g2,.g3,.g4,.checks{grid-template-columns:1fr}h1 span{display:block;margin-top:4px}}
+@media print{.sidebar,.to-top{display:none}.app{display:block}main{max-width:none;padding:0}body{background:#fff}.hero,.card,.diagram,.table-wrap{box-shadow:none}section{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+  <div class="brand">
+    <div class="logo">O2A</div>
+    <div><strong>opencode2api-win</strong><small>Windows 独立基线</small></div>
+  </div>
+  <div class="ver">v1.5.1-win.1 · 完整对齐</div>
+  <nav>
+    <a href="#s0"><b>00</b> 结论</a>
+    <a href="#s1"><b>01</b> 合并拓扑</a>
+    <a href="#s2"><b>02</b> 上游四提交</a>
+    <a href="#s3"><b>03</b> 免费道实测</a>
+    <a href="#s4"><b>04</b> 保留的 fork</a>
+    <a href="#s5"><b>05</b> 冲突与修复</a>
+    <a href="#s6"><b>06</b> 安全硬化</a>
+    <a href="#s7"><b>07</b> 风险与回滚</a>
+    <a href="#s8"><b>08</b> 下次升级</a>
+  </nav>
+  <div class="side-foot">
+    <strong>构建指纹</strong><br>
+    14,328,832 B<br>
+    SHA-256 6D614EFC…44812<br>
+    2026-11-21 · Windows amd64
+  </div>
+</aside>
+
+<main>
+  <header class="hero">
+    <div class="eyebrow">Release baseline · 2026-11-21</div>
+    <h1>完整对齐上游 v1.5.1 <span>＋ 保留 WARP 与免费道增强</span></h1>
+    <p class="lede">第一次把上游 v1.4.8 → v1.5.1 的四个提交全部纳入，用一次真实 merge 清掉选择性移植的欠账。后续升级回到普通 merge，不再靠补丁清单维护。</p>
+    <div class="badges">
+      <span class="badge ok">merge 18b6a15</span>
+      <span class="badge ok">build/vet/test 全绿</span>
+      <span class="badge">PID 24188 · 28080</span>
+      <span class="badge warn">catalog schema v4</span>
+      <span class="badge warn">#167 仍未移植</span>
+    </div>
+    <div class="hero-grid">
+      <div class="stat"><span>上游基线</span><strong>v1.5.1</strong><small>6575c62 · 2026-11-20</small></div>
+      <div class="stat"><span>运行状态</span><strong>ok / ready</strong><small>models 103 / exposed 11</small></div>
+      <div class="stat"><span>免费道冒烟</span><strong>200</strong><small>hy4 · 流式工具调用</small></div>
+      <div class="stat"><span>WARP 出口</span><strong>active 5</strong><small>size 32 · preload 12 · cooling 62</small></div>
+    </div>
+  </header>
+
+  <section id="s0">
+    <h2><span class="num">00</span>一页结论</h2>
+    <div class="grid g2">
+      <div class="card">
+        <h3>这次做对了什么</h3>
+        <div class="checks">
+          <div class="check"><div class="mark">✓</div><div><b>四个提交全部进源码</b><small>批量代理、OAuth 重构、客户端环境隔离、NBSP 工具描述。</small></div></div>
+          <div class="check"><div class="mark">✓</div><div><b>fork 能力没丢</b><small>WARP 池、SOCKS5 UDP、黑名单、亲和、预检全部保留。</small></div></div>
+          <div class="check"><div class="mark">✓</div><div><b>免费道可用</b><small>非流式 PONG 与流式 tool_calls 均 200。</small></div></div>
+          <div class="check"><div class="mark">✓</div><div><b>维护方式换了</b><small>下次升级直接 merge，不再做选择性移植。</small></div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>需要记住的三件事</h3>
+        <p><span class="tag warn">升级</span> catalog 缓存 schema 从 v3 升到 v4；旧缓存会被忽略并自动重拉，不是故障。</p>
+        <p><span class="tag warn">免费道</span> 429 先看出口池，不要先怀疑二进制；同一时刻不同免费模型结果可以不同。</p>
+        <p><span class="tag info">配置</span> 上游把 <span class="k">anonymous</span> 默认改为 false；本机显式保留 true，否则免费道关闭。</p>
+      </div>
+    </div>
+    <div class="callout ok">
+      <strong>一句话</strong>
+      <p>v1.5.1-win.1 = 上游 v1.5.1 + fork WARP/免费道增强，源码级完整对齐，运行与发布产物一致。</p>
+    </div>
+  </section>
+
+  <section id="s1">
+    <h2><span class="num">01</span>合并拓扑</h2>
+    <div class="diagram">
+      <svg viewBox="0 0 980 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="合并拓扑">
+        <rect x="10" y="10" width="960" height="280" rx="14" fill="#fbfcff" stroke="#e3e8f1"/>
+        <text x="34" y="42" class="svg-title">git graph · align/upstream-v1.5.1</text>
+        <text x="34" y="62" class="svg-sub">merge-base = 58f5667（v1.4.6 时代）</text>
+
+        <circle cx="70" cy="150" r="6" fill="#2457d6"/>
+        <text x="84" y="146" class="svg-title">58f5667</text>
+        <text x="84" y="164" class="svg-sub">共同祖先</text>
+
+        <path d="M76 150 H180" class="svg-arrow-accent"/>
+        <rect x="180" y="118" width="168" height="64" rx="10" class="svg-box-accent"/>
+        <text x="196" y="143" class="svg-title">11077fb</text>
+        <text x="196" y="161" class="svg-sub">v1.4.8-win.2 · main 旧头</text>
+
+        <path d="M76 150 C130 90 240 82 300 84" class="svg-arrow"/>
+        <rect x="300" y="52" width="180" height="64" rx="10" class="svg-box"/>
+        <text x="316" y="77" class="svg-title">0d05fe9</text>
+        <text x="316" y="95" class="svg-sub">批量代理 / 匿名默认</text>
+
+        <path d="M384 84 H470" class="svg-arrow"/>
+        <rect x="470" y="52" width="180" height="64" rx="10" class="svg-box"/>
+        <text x="486" y="77" class="svg-title">e2b2a7c · v1.5.0</text>
+        <text x="486" y="95" class="svg-sub">OAuth 重构 + 硬化</text>
+
+        <path d="M564 84 H650" class="svg-arrow"/>
+        <rect x="650" y="52" width="200" height="64" rx="10" class="svg-box"/>
+        <text x="666" y="77" class="svg-title">8f691a0</text>
+        <text x="666" y="95" class="svg-sub">客户端环境隔离 #190</text>
+
+        <path d="M754 84 H840" class="svg-arrow"/>
+        <rect x="790" y="118" width="170" height="64" rx="10" class="svg-box-ok"/>
+        <text x="806" y="143" class="svg-title">6575c62 · v1.5.1</text>
+        <text x="806" y="161" class="svg-sub">NBSP 工具描述 #188</text>
+        <path d="M850 84 V118" class="svg-arrow"/>
+
+        <path d="M264 182 H400" class="svg-arrow-accent"/>
+        <path d="M875 182 V210 H470" class="svg-arrow-accent"/>
+        <rect x="400" y="182" width="180" height="64" rx="10" class="svg-box-ok"/>
+        <text x="416" y="207" class="svg-title">18b6a15</text>
+        <text x="416" y="225" class="svg-sub">merge v1.5.1</text>
+
+        <path d="M490 246 V262" class="svg-arrow"/>
+        <rect x="400" y="262" width="180" height="26" rx="7" class="svg-box"/>
+        <text x="416" y="280" class="svg-sub">e092353 · 清理 goauth</text>
+
+        <text x="750" y="280" class="svg-sub">fork 分支保留 WARP / 会话亲和</text>
+      </svg>
+    </div>
+    <p class="caption">合并后不再维护“已移植/未移植”的手工清单；有冲突就按文件组解决，fork 能力作为本分支的长期差异保留。</p>
+  </section>
+
+  <section id="s2">
+    <h2><span class="num">02</span>上游四个提交都落在哪</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>提交</th><th>版本</th><th>本仓库落点</th><th>状态</th></tr></thead>
+        <tbody>
+          <tr><td>0d05fe9</td><td>v1.5.0 前</td><td><span class="k">admin/proxies.go</span>、<span class="k">gateway/proxy_check.go</span>、代理批量页</td><td><span class="tag ok">已纳入</span></td></tr>
+          <tr><td>e2b2a7c</td><td>v1.5.0</td><td><span class="k">internal/oauth</span>、<span class="k">admin/oauth.go</span>、<span class="k">protocol/stream.go</span>、<span class="k">config/secrets.go</span></td><td><span class="tag ok">已纳入</span></td></tr>
+          <tr><td>8f691a0</td><td>v1.5.0 后</td><td><span class="k">client_environment.go</span>、<span class="k">opencode_prompt.go</span>、<span class="k">toolshape.go</span></td><td><span class="tag ok">已纳入</span></td></tr>
+          <tr><td>6575c62</td><td>v1.5.1</td><td><span class="k">renameAndCompleteTools</span> 的 NBSP 替换</td><td><span class="tag ok">已纳入</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="grid g2" style="margin-top:12px">
+      <div class="card">
+        <h3>NBSP 到底改了什么</h3>
+        <p>只改客户端工具的<b>顶层 description</b>：Chat 是 <span class="k">function.description</span>，Anthropic/Responses 是 <span class="k">description</span>。参数 schema、追加的官方工具、名称还原都不动，替换幂等。</p>
+      </div>
+      <div class="card">
+        <h3>客户端环境隔离改了什么</h3>
+        <p>网关不再把宿主机的 <span class="k">D:\...</span>、<span class="k">win32</span>、workspace、git 状态塞给模型。客户端没声明时显示 <span class="k">unknown</span>；有声明时按请求快照。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="s3">
+    <h2><span class="num">03</span>免费道实测</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>场景</th><th>结果</th><th>判读</th></tr></thead>
+        <tbody>
+          <tr><td>deepseek-v4.1-flash-free · 非流式</td><td><span class="tag err">429</span> 40.8s</td><td>池内旧出口全部 429；session/project 已轮换</td></tr>
+          <tr><td>big-pickle · 非流式</td><td><span class="tag err">429</span> 26.9s</td><td>新出口预检 FreeUsageLimitError，该 /64 被标记 spent</td></tr>
+          <tr><td>hy4-flash-free · 非流式</td><td><span class="tag ok">200</span> 16.84s</td><td>返回 PONG；usage prompt 5576 / completion 16 / reasoning 12</td></tr>
+          <tr><td>hy4-flash-free · 流式 + tool_choice=required</td><td><span class="tag ok">200</span> 49.99s</td><td>首出口 43s 超时后换出口，4.8s 成功；get_weather {"city":"Paris"}、finish_reason=tool_calls、[DONE]</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout warn">
+      <strong>429 不等于版本坏了</strong>
+      <p>同一进程、同一时刻，hy4 可以 200。先看 <span class="k">warp.active</span> 与 <span class="k">cooling</span>，再看出口预检；不要把免费额度问题归因到 NBSP 或客户端环境。</p>
+    </div>
+  </section>
+
+  <section id="s4">
+    <h2><span class="num">04</span>保留的 fork 能力</h2>
+    <div class="grid g3">
+      <div class="card">
+        <h3>WARP 传输</h3>
+        <p><span class="tag info">保留</span> SOCKS5 UDP ASSOCIATE、Windows 物理网卡钉扎、TUN 开关、注册前预检。</p>
+      </div>
+      <div class="card">
+        <h3>出口记忆</h3>
+        <p><span class="tag info">保留</span> 24h 额度黑名单持久化、分级冷却、重启不清零；当前继承 56 个 spent 块。</p>
+      </div>
+      <div class="card">
+        <h3>会话与池</h3>
+        <p><span class="tag info">保留</span> AcquireFor 会话亲和、pool 32 / preload 12、429 换出口不换会话语义。</p>
+      </div>
+    </div>
+    <div class="callout">
+      <strong>上游 WARP 在 v1.4.8..v1.5.1 没有改动</strong>
+      <p>所以这次没有“漏掉 WARP 修复”的问题；<span class="k">internal/warp</span> 继续作为 fork 自有增强模块维护，不换成上游简化实现。</p>
+    </div>
+  </section>
+
+  <section id="s5">
+    <h2><span class="num">05</span>冲突与合并后修复</h2>
+    <div class="grid g2">
+      <div class="card">
+        <h3>20 个冲突文件的分组策略</h3>
+        <div class="table-wrap" style="box-shadow:none">
+          <table style="min-width:0">
+            <tbody>
+              <tr><td>gateway 核心 / stream</td><td>取上游；fork 逻辑上游已含</td></tr>
+              <tr><td>config.go</td><td>上游 + 补回 socks_udp / tun</td></tr>
+              <tr><td>warp.go / internal/warp</td><td>保留 fork</td></tr>
+              <tr><td>admin/server.go</td><td>两边的字段合并</td></tr>
+              <tr><td>webui/config.js</td><td>上游流程 + fork 提示</td></tr>
+              <tr><td>README / .gitignore</td><td>README 取上游；ignore 合并</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <h3>合并工具留下的坑</h3>
+        <p><span class="tag err">已修</span> pool.go / server.go 出现非法 UTF-8（em dash 被写成 E2 80 3F）。</p>
+        <p><span class="tag err">已修</span> refresh.go 出现两个 RefreshCatalog，保留上游 OAuth-aware 版本。</p>
+        <p><span class="tag err">已删</span> internal/goauth 已无调用方，随清理提交删除。</p>
+        <p><span class="tag ok">已验</span> build / vet / test 全绿，版本注入正确。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="s6">
+    <h2><span class="num">06</span>安全硬化（随 v1.5.0 一起生效）</h2>
+    <div class="checks">
+      <div class="check"><div class="mark">✓</div><div><b>禁止代理重定向</b><small>ErrUseLastResponse，防止 x-api-key 与请求体被重放。</small></div></div>
+      <div class="check"><div class="mark">✓</div><div><b>错误脱敏</b><small>错误体与 Retry-After 也经过 SecretRedactor；短 Key 显示哈希。</small></div></div>
+      <div class="check"><div class="mark">✓</div><div><b>SSE 帧校验</b><small>单帧上限 16 MiB；畸形/超长/未结束帧不转发。</small></div></div>
+      <div class="check"><div class="mark">✓</div><div><b>首帧后提交 200</b><small>deferredStreamWriter 避免无效前奏被当成成功。</small></div></div>
+      <div class="check"><div class="mark">✓</div><div><b>非流式上限</b><small>响应体 64 MiB；超限报错而不是截断转发。</small></div></div>
+      <div class="check"><div class="mark">✓</div><div><b>工具名 choiceIndex</b><small>重命名键隔离，避免跨 choice 错误消费。</small></div></div>
+    </div>
+  </section>
+
+  <section id="s7">
+    <h2><span class="num">07</span>风险、限制与回滚</h2>
+    <div class="grid g2">
+      <div class="card">
+        <h3>当前限制</h3>
+        <p><span class="tag warn">#167</span> Playground relay 固定仍未移植；只影响诊断页。</p>
+        <p><span class="tag warn">OAuth</span> 源码完整但本机未登录付费账号；sota/sweet 组仍 503。</p>
+        <p><span class="tag warn">监听</span> 当前 <span class="k">0.0.0.0:28080</span>，无需局域网访问时建议改回回环。</p>
+        <p><span class="tag warn">出口</span> 免费额度按 (project, /64) 计，冷却增长是正常现象。</p>
+      </div>
+      <div class="card">
+        <h3>回滚路径</h3>
+        <pre><code>Get-Process opencode2api | Stop-Process -Force
+Copy-Item .\opencode2api.exe.bak-20261121-pre-v1.5.1-win.1 `
+  .\opencode2api.exe -Force
+.\start-background.ps1</code></pre>
+        <p class="small muted">回滚只换回 win.2 二进制；config 无需改动。</p>
+      </div>
+    </div>
+    <div class="callout err">
+      <strong>不要先删 WARP 状态</strong>
+      <p>遇到 429 先等池子回血；只有确认所有出口都已耗尽、等待无效时，才备份并删除 <span class="k">config.json.warp-state.json</span>。</p>
+    </div>
+  </section>
+
+  <section id="s8">
+    <h2><span class="num">08</span>下次升级怎么做</h2>
+    <div class="diagram">
+      <svg viewBox="0 0 980 190" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="升级流程">
+        <defs>
+          <marker id="a" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#2457d6"/></marker>
+        </defs>
+        <rect x="10" y="10" width="960" height="170" rx="14" fill="#fbfcff" stroke="#e3e8f1"/>
+        <g>
+          <rect x="34" y="48" width="160" height="66" rx="10" class="svg-box-accent"/>
+          <text x="50" y="74" class="svg-title">1. fetch 上游 tag</text>
+          <text x="50" y="92" class="svg-sub">走 10809 代理，不走直连</text>
+
+          <rect x="232" y="48" width="150" height="66" rx="10" class="svg-box-accent"/>
+          <text x="248" y="74" class="svg-title">2. git merge</text>
+          <text x="248" y="92" class="svg-sub">完整 merge，不再挑提交</text>
+
+          <rect x="420" y="48" width="170" height="66" rx="10" class="svg-box"/>
+          <text x="436" y="74" class="svg-title">3. 解冲突</text>
+          <text x="436" y="92" class="svg-sub">保留 fork / 取上游</text>
+
+          <rect x="628" y="48" width="150" height="66" rx="10" class="svg-box"/>
+          <text x="644" y="74" class="svg-title">4. 构建验证</text>
+          <text x="644" y="92" class="svg-sub">build / vet / test</text>
+
+          <rect x="816" y="48" width="140" height="66" rx="10" class="svg-box-ok"/>
+          <text x="832" y="74" class="svg-title">5. 冒烟 + 发布</text>
+          <text x="832" y="92" class="svg-sub">免费道 200 再发</text>
+
+          <path d="M194 81 H232" class="svg-arrow-accent" marker-end="url(#a)"/>
+          <path d="M382 81 H420" class="svg-arrow-accent" marker-end="url(#a)"/>
+          <path d="M590 81 H628" class="svg-arrow-accent" marker-end="url(#a)"/>
+          <path d="M778 81 H816" class="svg-arrow-accent" marker-end="url(#a)"/>
+        </g>
+        <text x="34" y="146" class="svg-sub">冲突策略固定：gateway 核心取上游；config 补回 fork 字段；warp 保留；README 取上游；.gitignore 合并。</text>
+        <text x="34" y="164" class="svg-sub">每次升级只需确认一件事：fork 的 WARP 与免费道能力还在，且免费道实测 200。</text>
+      </svg>
+    </div>
+    <div class="callout ok">
+      <strong>发布检查单</strong>
+      <p>版本号 → 备份旧 exe → 启动 → /healthz → 非流式 PONG → 流式工具调用 → 更新 doc/12 / BASELINE / CHANGELOG / Canvas → tag + Release。</p>
+    </div>
+  </section>
+
+  <div class="footer">
+    <span>opencode2api-win · v1.5.1-win.1 · 上游 v1.5.1 / 6575c62</span>
+    <span>构建 2026-11-21 · SHA-256 6D614EFC…44812</span>
+  </div>
+</main>
+</div>
+<a class="to-top" href="#" aria-label="回到顶部">↑</a>
+</body>
+</html>

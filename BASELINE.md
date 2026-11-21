@@ -1,10 +1,10 @@
 # 运行基线（BASELINE）
 
-> 本文件是 **2026-11-17** 这台 Windows 机器上 `oc2-win` 的实际运行基线，用于后续升级、回归和换机对照。
+> 本文件是 **2026-11-21** 这台 Windows 机器上 `oc2-win` 的实际运行基线，用于后续升级、回归和换机对照。
 >
-> 上一份基线是 2026-11-03（已保留在 git 历史中）。本次对应版本 **v1.4.8-win.2**，完整发布说明见 [`doc/12-版本基线-v1.4.8-win.2.md`](doc/12-版本基线-v1.4.8-win.2.md)。
+> 上一份基线是 2026-11-17（v1.4.8-win.2，已保留在 git 历史中）。本次对应版本 **v1.5.1-win.1**，完整发布说明见 [`doc/12-版本基线-v1.5.1-win.1.md`](doc/12-版本基线-v1.5.1-win.1.md)。
 >
-> 密钥、真实 IPv6 前缀和 WebUI 密码不写入本文件；运行数据来自真实进程与真实请求。
+> 密钥、真实 IPv6 前缀、WebUI 密码不写入本文件；运行数据来自真实进程与真实请求。
 
 ---
 
@@ -15,15 +15,16 @@
 | 操作系统 | Windows 11 x64 |
 | Go（构建） | `go1.24.0 windows/amd64` |
 | 构建模式 | `CGO_ENABLED=0`，`-trimpath -ldflags "-s -w"` |
-| 二进制 | `opencode2api.exe`，13,925,376 字节，静态链接 |
-| 版本 | `v1.4.8-win.2` |
-| 上游基线 | v1.4.8 / `159d7fdf` |
-| 进程 | PID 23088，启动于 2026-11-17 04:52:19（本地） |
+| 二进制 | `opencode2api.exe`，14,328,832 字节，静态链接 |
+| 版本 | `v1.5.1-win.1` |
+| 上游基线 | v1.5.1 / `6575c62` |
+| 合并提交 | `18b6a15`（merge v1.5.1），清理 `e092353` |
+| 进程 | PID 24188，启动于 2026-11-21 02:37:47Z |
 | API 监听 | `0.0.0.0:28080` |
 | WebUI 监听 | `127.0.0.1:28081` |
 | 配置文件 | `D:\Project\Openchamber\Token\opencode\oc2-win\config.json` |
-| 日志 | `logs\run-v1.4.8-win.2-*.log` |
-| 本机代理 | `socks5://127.0.0.1:7897`（Clash Verge / mihomo） |
+| 日志 | `logs\win3-out.log`、`logs\win3-err.log` |
+| 本机代理 | `socks5://127.0.0.1:10808`（Clash Verge / mihomo）；HTTP 10809 |
 
 > 当前 `listen` 是 `0.0.0.0`，局域网可访问；如不需要，改回 `127.0.0.1` 并重启。
 
@@ -32,8 +33,8 @@
 ## 2. 二进制
 
 ```text
-SHA-256  CDFD9834AD3B20455A81449D8F320BCF866FEC23DA7BFE5FA9C246025D343CFD
-大小     13,925,376 bytes
+SHA-256  6D614EFC858E791EAFC8B4C3163CB8423730A19C1A2376818BC0AA1DC8F44812
+大小     14,328,832 bytes
 ```
 
 构建命令：
@@ -41,8 +42,8 @@ SHA-256  CDFD9834AD3B20455A81449D8F320BCF866FEC23DA7BFE5FA9C246025D343CFD
 ```powershell
 $env:PATH = 'C:\Go\go\bin;' + $env:PATH
 $env:CGO_ENABLED = '0'
-go build -trimpath -ldflags "-s -w -X main.version=v1.4.8-win.2" `
-  -o opencode2api-v1.4.8-win.2.exe ./cmd/opencode2api
+go build -trimpath -ldflags "-s -w -X main.version=v1.5.1-win.1" `
+  -o opencode2api.exe ./cmd/opencode2api
 ```
 
 校验：
@@ -55,8 +56,9 @@ curl.exe --noproxy "*" http://127.0.0.1:28080/healthz
 | 文件 | 说明 |
 |---|---|
 | `opencode2api.exe` | 当前运行，哈希同上 |
-| `release/v1.4.8-win.2/opencode2api.exe` | 本次构建产物，与运行文件同哈希 |
-| `opencode2api.exe.bak-20261117-035256-pre-v1.4.8-win.2` | 替换前二进制（win.1，19,871,232 字节） |
+| `release/v1.5.1-win.1/opencode2api.exe` | 本次构建产物，与运行文件同哈希 |
+| `opencode2api.exe.bak-20261121-pre-v1.5.1-win.1` | 替换前二进制（win.2，13,925,376 字节，`CDFD9834…`） |
+| `opencode2api.exe.bak-20261117-035256-pre-v1.4.8-win.2` | 更早的 win.1 二进制（19,871,232 字节） |
 | `config.json.bak-20261116-222128` | win.1 调参前配置 |
 | `config.json.warp-state.json.bak-20261116-223051` | win.1 重置前 WARP 状态 |
 
@@ -65,21 +67,21 @@ curl.exe --noproxy "*" http://127.0.0.1:28080/healthz
 ## 3. 运行状态（实测）
 
 ```json
-{"status":"ok","ready":true,"version":"v1.4.8-win.2",
- "models":{"status":"ready","total":86,"exposed":12,"zen":86,"go":0},
+{"status":"ok","ready":true,"version":"v1.5.1-win.1",
+ "models":{"status":"ready","total":103,"exposed":11,"zen":103,"go":0},
  "keys":{"zen":0,"go":0,"total":0,"anonymous":true},
  "proxies":{"total":1,"healthy":1,"unhealthy":0},
  "warp":{"status":"ready","stack":"ipv6","size":32,"preload":12,
-         "active":1,"standby":1,"cooling":10}}
+         "active":5,"standby":5,"cooling":62}}
 ```
 
 判读：
-
 - `ready:true` 表示 API 可以接请求；
 - `warp.active > 0` 表示当前有可用出口；
 - `cooling` 是历史 `/64` 冷却记录，不代表当前出口全不可用；
 - `keys.zen` / `keys.go` 为 0，表示当前只跑匿名免费车道；
-- `models.exposed=12` 是 `free_only=true` 过滤后的可路由模型数。
+- `models.exposed=11` 是 `free_only=true` 过滤后的可路由模型数。
+- catalog 缓存已升到 schema v4；启动时旧 v3 缓存被拒绝并重新拉取（live 73 个），属正常升级。
 
 ---
 
@@ -96,114 +98,104 @@ curl.exe --noproxy "*" http://127.0.0.1:28080/healthz
     "enabled": true,
     "pool_size": 32,
     "stack": "ipv6",
-    "socks_udp": "socks5://127.0.0.1:7897"
+    "socks_udp": "socks5://127.0.0.1:10808"
   },
-  "proxies": ["socks5://127.0.0.1:7897"],
+  "proxies": ["socks5://127.0.0.1:10808"],
   "retry": { "max_attempts": 60, "timeout_seconds": 300 },
-  "performance": {
-    "max_idle_conns": 256,
-    "max_idle_conns_per_host": 32,
-    "max_conns_per_host": 0,
-    "idle_conn_timeout_seconds": 120,
-    "connect_timeout_seconds": 10,
-    "failure_cooldown_seconds": 15,
-    "attempt_timeout_seconds": 120,
-    "first_event_timeout_seconds": 0,
-    "max_anonymous_exits": 32,
-    "free_tier_block_seconds": 120
-  },
-  "rotation": {
-    "sota": {
-      "order": ["deepseek-v4.1-flash", "glm-5.3", "grok-4.6", "kimi-k3", "qwen3.8-max"]
-    },
-    "first_output_seconds": 30
-  },
-  "reasoning": { "effort": "max" }
+  "performance": { "max_anonymous_exits": 32, "free_tier_block_seconds": 120 }
 }
 ```
 
-### 4.1 v1.4.8 新增配置
+说明：
+- 上游 v1.5.0 模板把 `anonymous` 默认值改为 `false`；本机显式保留 `true`，否则免费道不可用。
+- `go_oauth`/`zen_oauth` 未配置；`go_subscription` 已从配置和代码中移除（旧值仍可迁移读取）。
+- `warp.socks_udp` 与 `warp.source_ipv6` 互斥；本机用前者。
+- 旧版 `warpool#pool` 前缀为历史值，当前 `proxies` 是单条 10808。
 
-| 字段 | 当前值 | 说明 |
+---
+
+## 5. 验证矩阵（2026-11-21）
+
+### 5.1 构建与测试
+
+| 项 | 命令 | 结果 |
 |---|---|---|
-| `proxy_bindings` | 未设置 | 把出口固定到代理；失败不迁移 |
-| `upstream.prompt_environment` | `{}` | 覆盖工作目录/平台/git 标记 |
-| `models.active_probes` | `false` | 关闭主动探测，避免额外消耗免费额度 |
-| `go_subscription` | 未设置 | Go Device OAuth 占位；没有 `go_keys` 时不用 |
-| `performance.max_anonymous_exits` | `32` | 一次请求最多抽多少个出口 |
-| `performance.free_tier_block_seconds` | `120` | 免费层标记后的出口冷却 |
+| 构建 | `go build ./...` | `exit 0` |
+| 静态检查 | `go vet ./...` | `exit 0` |
+| 单元测试 | `go test ./... -count=1` | `gateway 0.127s`、`protocol 0.037s`、`warp 12.216s`，全部 `ok` |
+| 版本注入 | `/healthz` | `version=v1.5.1-win.1` |
+
+### 5.2 免费道请求
+
+| 场景 | 结果 | 说明 |
+|---|---|---|
+| `deepseek-v4.1-flash-free` 非流式 | `429` / 40.8s | 池内旧出口全部 429；session/project 已轮换 |
+| `big-pickle` 非流式 | `429` / 26.9s | 新出口预检 `FreeUsageLimitError`，该 `/64` 被标记 spent |
+| `hy4-flash-free` 非流式 | `200` / 16.84s / `PONG` | usage: prompt 5576 / completion 16 / reasoning 12 |
+| `hy4-flash-free` 流式 + `tool_choice=required` | `200` / 49.99s | 首出口 `transport_headers` 43.0s 后换出口，4.8s 成功；`get_weather {"city":"Paris"}`、`finish_reason=tool_calls`、`[DONE]` |
+
+结论：同一时刻 `hy4-flash-free` 能 200，说明免费道和二进制正常；`deepseek`/`big-pickle` 的 429 是出口状态，不是版本故障。
+
+### 5.3 上游修复验证
+
+| 修复 | 验证方式 | 结果 |
+|---|---|---|
+| #188 NBSP 工具描述 | 源码 `strings.ReplaceAll(description, " ", "\u00a0")`；流式工具调用带空格描述仍 200 | 通过 |
+| #190 客户端环境隔离 | `client_environment.go` 与上游逐字节一致；请求路径不再 `os.Getwd()`/`runtime.GOOS` | 通过 |
+| e2b2a7c 流式硬化 | 16 MiB 帧上限、首帧前 502、64 MiB 非流式上限、choiceIndex | 源码与测试通过 |
+| 代理重定向拒绝 | `CheckRedirect` 返回 `ErrUseLastResponse` | 源码与测试通过 |
+| OAuth 重构 | `internal/oauth` 编译、配置迁移、catalog v4 | 通过（未启用账号 OAuth） |
+| 批量代理管理 | `POST /api/proxies/check`、WebUI 代理页 | 编译/静态通过；本机单代理未批量使用 |
 
 ---
 
-## 5. 免费道验证
-
-### 5.1 win.2 部署后实测（2026-11-17 04:52 起，PID 23088）
-
-| 场景 | 结果 |
-|---|---|
-| 极简请求（无 tools，非流式） | `200` / 3.12s / `PONG` |
-| 带 tools 非流式（部署前同代码） | `200` / 5.19s / `PONG` |
-| 带 tools 流式 SSE | `200` / 4.56s / `role → PONG → stop`、`[DONE]`、`finish_reason=length` |
-| `tool_choice=required` 工具调用 | `200` / 13.58s / `get_weather {"city":"Paris"}`、`finish_reason=tool_calls`、`[DONE]` |
-| 被动可用性记账 | `availability.json` 记录 `deepseek-v4.1-flash-free` / `reason=passive_traffic_succeeded` |
-| 主动探测开关 | `models.active_probes=false` 时启动日志无 `availability_checked` 探针 |
-
-win.1 的历史对照：极简 `200/29.1s`、带 tools 非流式 `200/35.1s`、带 tools 流式 `200/8.0s`；池子里只有 1 个出口时 `429/96s`，4+ 个新出口时 `200/8.0s`。win.2 的响应时间下降来自出口状态回血与探测修复，不是请求路径变化。
-
-### 5.2 池回血曲线
-
-| t | active | cooling |
-|---:|---:|---:|
-| 0s | 0 | 4 |
-| 40s | 0 | 3 |
-| 80s | 1 | 2 |
-| 120s | 2 | 2 |
-| 160s | 4 | 2 |
-| 200s | 4 | 2 |
-
-### 5.3 三层原因
-
-1. 旧 exe 仍发 `clint_` 工具名 → 上游免费层直接 429；
-2. `warp-state.json` 继承 13–14 个已耗尽出口 → 池子启动即冷却；
-3. `pool_size` / `max_anonymous_exits` / `free_tier_block_seconds` 偏小 → 出口补充慢。
-
-处理与证据见 [`doc/12`](doc/12-版本基线-v1.4.8-win.2.md) 第 3 节。
-
----
-
-## 6. 单元测试与构建验证
+## 6. WARP 状态
 
 ```text
-go build ./...                 PASS
-go vet ./...                   exit 0
-go test ./... -count=1         PASS (gateway / protocol / warp)
-GOOS=linux   go build          PASS
-GOOS=darwin  go build          PASS
-GOOS=windows go build          PASS
+继承 spent 块          56（config.json.warp-state.json）
+池上限                32
+预热                  12
+就绪                  5
+备份 standby          5
+冷却                  62
+外层 UDP               socks5://127.0.0.1:10808（UDP ASSOCIATE）
+网卡钉扎              WLAN（ifIndex 22）
 ```
 
+- 本仓库保留 fork 的 WARP 实现：24h 额度黑名单、注册预检、会话亲和、SOCKS5 UDP、Windows 网卡钉扎。
+- 上游 v1.4.8..v1.5.1 没有修改 `internal/warp`，因此本版不存在“漏掉上游 WARP 修复”的问题。
+- 当前 `cooling=62` 偏多但仍有 `active=5`；遇到 429 先等 2–4 分钟，不要立即重启进程。
+
 ---
 
-## 7. 已知限制
+## 7. 发布与画布
 
-| 限制 | 说明 |
+| 项 | 值 |
 |---|---|
-| WARP 依赖本机 Clash 7897 | 7897 的 TCP 或 UDP 不通时，WARP 会 `handshake=never rx=0`；后台自动重试，恢复后无需重启 |
-| 免费额度按 project × 出口 | 连续请求会快速消耗出口；等池子回血或重置 `warp-state.json` |
-| `free_only=true` | `sota` 组返回 `503 rotation_unavailable`；付费模型返回 `400 not free` |
-| Go OAuth 未完整实现 | `go_subscription` 只是配置占位 |
-| 发布提交 | 代码 `758cb59`；tag `v1.4.8-win.2`（含本文档），已推 GitHub |
-| 未移植 `#167` | Playground 固定 relay 的诊断参数；只影响诊断页，不影响请求路径 |
-| 未移植 `0d05fe93` | v1.4.8 后的未发版提交，含匿名默认关闭与批量代理管理 |
+| 发布目录 | `release/v1.5.1-win.1/` |
+| 发布包 | `release/opencode2api-v1.5.1-win.1.zip`，SHA-256 `41018C0E2801E5BFEE8F9B9B5A6C461D47C179F57C674B007A87252F91C120C1` |
+| 画布（本版） | Canvas `06GZR0P1MCHNSNZT4RXFX97XJV-opencode2api-win-v1-5-1-win-1` |
+| 画布（win.2） | Canvas `06GYK5J08WVHTJQ0RWYNZM0EMS-opencode2api-win-2026-11-17-v1-4-8-win-2` |
+| GitHub Release | 待发布：`v1.5.1-win.1` |
 
 ---
 
-## 8. 下次从这里开始
+## 8. 回滚
 
-1. 打开网关：`.\start-background.ps1`。
-2. 看健康：`curl.exe --noproxy "*" http://127.0.0.1:28080/healthz`。
-3. 若 `warp.active=0` 且 `cooling` 持续增长：
-   - 先确认 Clash 7897 可用；
-   - 再按 `doc/12` 7.3 重置 `warp-state.json`；
-   - 重启后等 2–4 分钟让池子回血。
-4. 更新版本时按 `doc/12` 第 9 节清单执行，并同步更新本文件与 Canvas。
+```powershell
+Get-Process opencode2api -ErrorAction SilentlyContinue | Stop-Process -Force
+Copy-Item .\opencode2api.exe.bak-20261121-pre-v1.5.1-win.1 .\opencode2api.exe -Force
+.\start-background.ps1
+curl.exe --noproxy "*" http://127.0.0.1:28080/healthz
+```
+
+回滚后 `version` 应为 `v1.4.8-win.2`，`models` 会重新加载旧 catalog 缓存（schema v3 在本版仍可写），WARP 状态文件不变。
+
+---
+
+## 9. 遗留
+
+- `#167` Playground relay 固定仍未移植（只影响诊断页）。
+- `internal/goauth` 已删除；OAuth 相关代码完整但未接入账号。
+- Forgejo 镜像 `origin` 仍不可达（`172.30.196.173:3005` 在 WSL 网段，WSL 已停用）；GitHub 为权威发布源。
+- 上游 v1.5.1 之后如有新提交，按 `doc/12` 第 9 节的普通 merge 流程处理。
