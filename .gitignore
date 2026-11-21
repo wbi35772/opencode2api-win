@@ -1,8 +1,27 @@
 /opencode2api.exe
+/opencode2api
 /config.json
 /config.json.*
 /logs/
 *.log
+.tmp/
+.gocache/
+*.models.catalog.json
+*.models.dev.json
+coverage.out
+*.test
+*.test.exe
+test/
+
+# Local credentials and runtime state (contain private keys or tokens)
+.key
+config.json.bak
+.config-*.tmp
+*.rotation.json
+.rotation-*.tmp
+.local/
+*.availability.json
+opencode/
 
 # Local MASQUE/WARP instances (contain private keys)
 usque/
@@ -10,5 +29,4 @@ usque/
 /tools/
 /config-backups/
 *.exe.bak*
-test/
 /release/

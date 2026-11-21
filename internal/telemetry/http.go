@@ -110,6 +110,9 @@ func (w *statusWriter) Write(data []byte) (int, error) {
 }
 
 func (w *statusWriter) Flush() {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
 	_ = http.NewResponseController(w.ResponseWriter).Flush()
 }
 

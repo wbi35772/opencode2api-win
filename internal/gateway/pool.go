@@ -104,6 +104,7 @@ type anonymousCursor struct {
 	start  int
 	offset int
 	used   []bool
+	single bool
 }
 
 // anonymousPool builds one anonymous node per proxy transport, or an empty
@@ -150,6 +151,25 @@ func (p *anonymousNodes) HasPool() bool {
 	return p != nil && p.hasPool
 }
 
+// CursorForProxy returns a cursor whose first Next hands back the node that
+// uses proxy and whose second returns nil, so a relay-pinned diagnostic
+// attempts exactly one exit. A proxy outside the pool yields the same
+// single-shot cursor over no node, which the caller reports as an error.
+func (p *anonymousNodes) CursorForProxy(proxy *proxyTransport) anonymousCursor {
+	c := anonymousCursor{pool: p, start: -1, single: true}
+	if p == nil || proxy == nil {
+		return c
+	}
+	c.offset = len(p.nodes)
+	for i, node := range p.nodes {
+		if node.proxy == proxy {
+			c.start = i
+			return c
+		}
+	}
+	return c
+}
+
 // CursorFor returns a cursor whose first node is stable for a non-empty
 // affinity key, keeping a conversation on one exit; an empty affinity rotates
 // the starting node round-robin.
@@ -166,6 +186,18 @@ func (p *anonymousNodes) CursorFor(affinity string) anonymousCursor {
 		start = int(hash.Sum64() % uint64(len(p.nodes)))
 	}
 	return anonymousCursor{pool: p, start: start}
+}
+
+// CursorForOffset is CursorFor shifted by offset nodes. A request that has
+// already spent offset attempts starts on the next node instead of repeating
+// the exit that just failed it.
+func (p *anonymousNodes) CursorForOffset(affinity string, offset int) anonymousCursor {
+	cursor := p.CursorFor(affinity)
+	if p == nil || len(p.nodes) == 0 || offset <= 0 {
+		return cursor
+	}
+	cursor.start = (cursor.start + offset) % len(p.nodes)
+	return cursor
 }
 
 // AllowAttempt reports whether an anonymous attempt may run. An open breaker
@@ -289,6 +321,14 @@ func (c *anonymousCursor) Next() *anonymousNode {
 	n := len(c.pool.nodes)
 	if c.used == nil {
 		c.used = make([]bool, n)
+	}
+	if c.single {
+		index := c.start
+		c.start = -1
+		if index < 0 || index >= n {
+			return nil
+		}
+		return c.pool.nodes[index]
 	}
 	now := time.Now().UnixNano()
 	isBlocked := func(node *anonymousNode) bool {
@@ -490,7 +530,14 @@ func transportPool(proxies []string, cfg config.PerformanceConfig, responseHeade
 		if err != nil {
 			return nil, fmt.Errorf("proxy %s: %w", config.RedactURL(raw), err)
 		}
-		proxy := &proxyTransport{index: len(p.items), name: raw, pool: isPool, client: &http.Client{Transport: transport}, bun: &http.Client{Transport: bun}}
+		// Redirects can forward x-api-key and replay an inference body to a
+		// different origin. The configured endpoint owns the request directly.
+		rejectRedirect := func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		proxy := &proxyTransport{
+			index: len(p.items), name: raw, pool: isPool,
+			client: &http.Client{Transport: transport, CheckRedirect: rejectRedirect},
+			bun:    &http.Client{Transport: bun, CheckRedirect: rejectRedirect},
+		}
 		proxy.healthy.Store(true)
 		p.items = append(p.items, proxy)
 	}
@@ -568,7 +615,7 @@ func (p *proxyTransports) checkClaimedProxy(ctx context.Context, proxy *proxyTra
 		result.wasHealthy = proxy.healthy.Swap(true)
 	} else if !errors.Is(err, context.Canceled) {
 		// A probe is a plain HTTP GET issued *through* the proxy. If it did not
-		// return a response, this proxy cannot currently serve traffic — the
+		// return a response, this proxy cannot currently serve traffic —the
 		// CONNECT was refused, the tunnel broke, the connection was reset, or it
 		// timed out. Every such outcome must count as a failure.
 		//
