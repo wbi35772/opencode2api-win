@@ -5,11 +5,17 @@
   "go_keys": [],
   // Anonymous traffic may be heavily blocked upstream. Prefer a Zen API Key.
   "anonymous": false,
+  // Fork extras: socks_udp relays the outer WireGuard datagrams through a
+  // SOCKS5 proxy that supports UDP ASSOCIATE (e.g. "socks5://127.0.0.1:10808").
+  // tun lets the sockets follow the host's system route instead of pinning the
+  // physical adapter. socks_udp and source_ipv6 are mutually exclusive.
   "warp": {
     "enabled": false,
     "pool_size": 4,
     "stack": "ipv6",
-    "source_ipv6": ""
+    "source_ipv6": "",
+    "socks_udp": "",
+    "tun": false
   },
   "proxies": ["direct"],
   "proxyfile": "",
